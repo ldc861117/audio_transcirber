@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>音频转写工具 — Audio Transcriber</title>
+  <meta name="description" content="拖入音频，自动切分，快速转写" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+
+  <!-- ── Toolbar ─────────────────────────────────────────── -->
+  <header class="toolbar">
+    <div class="toolbar-brand">
+      <span class="brand-icon">🎙️</span>
+      <h1 class="brand-name">音频转写</h1>
+    </div>
+    <button class="config-pill" id="configToggle" title="API 配置">
+      <span class="pill-label" id="pillModel">未配置</span>
+      <span class="pill-dot" id="pillDot"></span>
+      <svg class="pill-gear" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path
+          d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008.4 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.6 8.4a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.08V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+      </svg>
+    </button>
+  </header>
+
+  <!-- ── Config Panel (slide-down) ───────────────────────── -->
+  <div class="config-panel collapsed" id="configPanel">
+    <div class="config-inner">
+      <div class="form-row">
+        <div class="form-group fg-grow">
+          <label for="baseUrl">Base URL <span class="tt" data-tip="API 服务地址，通常以 /v1 结尾">ⓘ</span></label>
+          <input id="baseUrl" type="url" placeholder="https://api.example.com/v1" spellcheck="false" />
+        </div>
+        <div class="form-group">
+          <label for="modelName">Model <span class="tt" data-tip="模型名称，如 gemini-2.5-flash">ⓘ</span></label>
+          <input id="modelName" type="text" placeholder="gemini-2.5-flash" spellcheck="false" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group fg-grow">
+          <label for="apiKey">API Key <span class="tt" data-tip="从 API 服务商获取的密钥">ⓘ</span></label>
+          <div class="input-with-btn">
+            <input id="apiKey" type="password" placeholder="sk-..." spellcheck="false" />
+            <button class="btn-icon" id="toggleKeyVisibility" title="显示/隐藏">👁️</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>切分 <span class="tt" data-tip="较大音频自动切分为小片段">ⓘ</span></label>
+          <div class="split-settings">
+            <div class="mini-input"><input id="maxMinutes" type="number" value="10" min="1" max="60" /><span>分钟</span>
+            </div>
+            <div class="mini-input"><input id="maxMB" type="number" value="20" min="1" max="200" /><span>MB</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="config-actions">
+        <button class="btn btn-primary btn-sm" id="saveConfigBtn">💾 保存</button>
+        <button class="btn btn-ghost btn-sm" id="testBtn">🔗 测试连接</button>
+        <span class="test-result" id="testResult"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main Content ────────────────────────────────────── -->
+  <main class="main">
+    <!-- Drop Zone (Hero) -->
+    <section class="drop-zone" id="dropZone">
+      <div class="drop-content" id="dropContent">
+        <svg class="waveform-icon" viewBox="0 0 120 60" fill="none">
+          <rect class="bar b1" x="8" y="20" width="4" rx="2" height="20" fill="var(--accent)" opacity=".5" />
+          <rect class="bar b2" x="18" y="14" width="4" rx="2" height="32" fill="var(--accent)" opacity=".65" />
+          <rect class="bar b3" x="28" y="8" width="4" rx="2" height="44" fill="var(--accent)" opacity=".8" />
+          <rect class="bar b4" x="38" y="4" width="4" rx="2" height="52" fill="var(--accent)" opacity=".9" />
+          <rect class="bar b5" x="48" y="2" width="4" rx="2" height="56" fill="var(--accent)" opacity="1" />
+          <rect class="bar b6" x="58" y="2" width="4" rx="2" height="56" fill="var(--accent)" opacity="1" />
+          <rect class="bar b7" x="68" y="4" width="4" rx="2" height="52" fill="var(--accent)" opacity=".9" />
+          <rect class="bar b8" x="78" y="8" width="4" rx="2" height="44" fill="var(--accent)" opacity=".8" />
+          <rect class="bar b9" x="88" y="14" width="4" rx="2" height="32" fill="var(--accent)" opacity=".65" />
+          <rect class="bar b10" x="98" y="20" width="4" rx="2" height="20" fill="var(--accent)" opacity=".5" />
+        </svg>
+        <p class="drop-text">拖拽音频文件到此处</p>
+        <p class="drop-hint">支持 WAV / MP3 / FLAC / AAC / OGG / M4A / OPUS 等所有常见格式</p>
+        <input type="file" id="fileInput" accept="audio/*" hidden />
+      </div>
+      <div class="file-info" id="fileInfo" style="display:none">
+        <div class="file-meta">
+          <span class="file-icon">🎵</span>
+          <div>
+            <div class="file-name" id="fileName"></div>
+            <div class="file-size" id="fileSize"></div>
+          </div>
+        </div>
+        <div class="file-actions">
+          <button class="btn btn-ghost btn-sm" id="cancelFileBtn">✕</button>
+          <button class="btn btn-primary" id="startBtn">🚀 开始转写</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Progress -->
+    <section class="card" id="progressCard" style="display:none">
+      <div class="card-header"><span>📊 转写进度</span><span class="status-badge" id="statusBadge">准备中</span></div>
+      <div class="card-body">
+        <div class="timer-row">
+          <div class="timer-elapsed" id="timerDisplay">0:00</div>
+          <div class="timer-eta" id="timerETA"></div>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText">等待开始...</div>
+        <div class="chunks-grid" id="chunksGrid"></div>
+      </div>
+    </section>
+
+    <!-- Result -->
+    <section class="card result-card" id="resultCard" style="display:none">
+      <div class="card-header">
+        <span>📝 转写结果</span>
+        <div class="result-actions">
+          <button class="btn btn-ghost btn-sm" id="copyBtn">📋 复制</button>
+          <button class="btn btn-ghost btn-sm" id="downloadBtn">💾 TXT</button>
+          <button class="btn btn-ghost btn-sm" id="downloadMdBtn">📄 MD</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="transcript-output" id="transcriptOutput"></div>
+      </div>
+      <div class="card-footer"><button class="btn btn-primary" id="newTaskBtn">🔄 开始新任务</button></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="shortcuts-hint">
+      <kbd>⌘</kbd><kbd>Enter</kbd> 开始转写 <span class="sep">·</span> <kbd>⌘</kbd><kbd>S</kbd> 保存配置
+    </div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+
+</html>
