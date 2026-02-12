@@ -1,1 +1,9 @@
 docs_local/
+AGENTS.md
+start.sh
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.pytest_cache/
