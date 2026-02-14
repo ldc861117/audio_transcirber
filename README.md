@@ -51,7 +51,7 @@ Audio Transcriber is a Flask-based web application designed for efficient and ac
 3.  Configure your API settings in the web interface:
     - **Base URL**: Your API provider's base URL (e.g., `https://generativelanguage.googleapis.com/v1beta/openai/` for Gemini).
     - **API Key**: Your API key.
-    - **Model**: The model name (e.g., `gemini-1.5-flash`).
+    - **Model**: The model name (e.g., `gemini-2.5-flash`).
 
 4.  Upload an audio file and wait for the transcription to complete.
 

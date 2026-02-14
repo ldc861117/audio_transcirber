@@ -5,12 +5,21 @@ transcribes each chunk via an OpenAI-compatible Gemini API, and
 merges results.
 """
 
-import os, uuid, base64, tempfile, threading, traceback
+import os
+import uuid
+import base64
+import tempfile
+import threading
+import traceback
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from pydub import AudioSegment
 from openai import OpenAI
+try:
+    from zhipuai import ZhipuAI
+except ImportError:
+    ZhipuAI = None
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
@@ -33,18 +42,23 @@ tasks: dict[str, dict] = {}
 DEFAULT_MAX_CHUNK_MINUTES = 10       # minutes per chunk
 DEFAULT_MAX_CHUNK_MB      = 20       # MB per chunk (safe for base64 inline)
 
+# Load optional defaults from environment (for Quick Start)
+DEFAULT_BASE_URL = os.environ.get("DEFAULT_BASE_URL", "")
+DEFAULT_API_KEY  = os.environ.get("DEFAULT_API_KEY", "")
+DEFAULT_MODEL    = os.environ.get("DEFAULT_MODEL", "")
+
 
 # ================================================================
 #  Utilities
 # ================================================================
 
-def split_audio(filepath: str, max_minutes: int, max_mb: int) -> list[str]:
+def split_audio(filepath: str, max_minutes: int, max_mb: int, preferred_format: str = "mp3") -> list[str]:
     """
     Split an audio file by duration AND file-size constraints.
-    Returns a list of temporary file paths for each chunk (always mp3).
+    Returns a list of temporary file paths for each chunk.
     """
     audio = AudioSegment.from_file(filepath)
-    fmt = "mp3"  # always export as mp3 for API compatibility
+    fmt = preferred_format if preferred_format in ["mp3", "m4a"] else "mp3"
 
     chunk_ms = max_minutes * 60 * 1000
     chunks_by_time: list[AudioSegment] = []
@@ -93,15 +107,35 @@ def _binary_split(segment: AudioSegment, fmt: str, max_mb: int) -> list[AudioSeg
            _binary_split(segment[mid:], fmt, max_mb)
 
 
-def transcribe_chunk(chunk_path: str, client: OpenAI, model: str) -> str:
-    """Send a single audio chunk to the OpenAI-compatible API and return text."""
-    mime = "audio/mpeg"  # chunks are always exported as mp3
+def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "openai") -> str:
+    """Send a single audio chunk to the appropriate API and return text."""
+    if provider == "zhipu" and ZhipuAI and isinstance(client, ZhipuAI) and ("asr" in model.lower() or model == "glm-asr-2512"):
+        # Use Zhipu SDK for dedicated ASR
+        with open(chunk_path, "rb") as f:
+            response = client.audio.transcriptions.create(
+                model=model,
+                file=f,
+            )
+        return response.text
+
+    if provider == "modelscope":
+        # ModelScope Serverless API is OpenAI-compatible for ASR
+        with open(chunk_path, "rb") as f:
+            response = client.audio.transcriptions.create(
+                model=model,
+                file=f,
+                response_format="text"
+            )
+        return response if isinstance(response, str) else response.text
+
+    # Default: OpenAI-compatible Multimodal Chat completion
+    mime = "audio/mpeg" if chunk_path.endswith(".mp3") else "audio/mp4"
     with open(chunk_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    kwargs = {
+        "model": model,
+        "messages": [
             {
                 "role": "system",
                 "content": (
@@ -142,31 +176,42 @@ def transcribe_chunk(chunk_path: str, client: OpenAI, model: str) -> str:
                 ],
             }
         ],
-        max_tokens=8192,
-    )
+        "max_tokens": 8192,
+    }
+    
+    # Special: Zhipu Thinking parameter
+    if provider == "zhipu" and "glm-4.6v" in model:
+        kwargs["extra_body"] = {"thinking": True}
+
+    response = client.chat.completions.create(**kwargs)
     return response.choices[0].message.content.strip()
 
 
 def run_transcription(task_id: str, filepath: str,
                       base_url: str, api_key: str, model: str,
-                      max_minutes: int, max_mb: int):
+                      max_minutes: int, max_mb: int, provider: str = "openai"):
     """Background worker: split → transcribe → merge."""
     task = tasks[task_id]
     try:
         # ── 1. Split ────────────────────────────────────────────
         task["status"] = "splitting"
-        chunks = split_audio(filepath, max_minutes, max_mb)
+        # Optimize format for Zhipu SDK (m4a is supported and efficient)
+        pref_fmt = "m4a" if provider == "zhipu" else "mp3"
+        chunks = split_audio(filepath, max_minutes, max_mb, preferred_format=pref_fmt)
         task["total_chunks"] = len(chunks)
         task["status"] = "transcribing"
 
         # ── 2. Transcribe each chunk ────────────────────────────
-        client = OpenAI(base_url=base_url, api_key=api_key)
+        if provider == "zhipu" and ZhipuAI:
+            client = ZhipuAI(api_key=api_key)
+        else:
+            client = OpenAI(base_url=base_url, api_key=api_key)
         results: list[str] = []
         for i, chunk_path in enumerate(chunks):
             task["current_chunk"] = i + 1          # which chunk is being processed NOW
             task["completed_chunks"] = i            # how many are fully done
             try:
-                text = transcribe_chunk(chunk_path, client, model)
+                text = transcribe_chunk(chunk_path, client, model, provider=provider)
                 results.append(text)
                 task["chunk_results"].append({
                     "index": i + 1,
@@ -224,15 +269,16 @@ def upload():
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         return jsonify({"error": f"不支持的格式 {ext}，支持: {supported}"}), 400
 
-    base_url  = request.form.get("base_url", "").strip()
-    api_key   = request.form.get("api_key", "").strip()
-    model     = request.form.get("model", "").strip()
+    base_url  = request.form.get("base_url", "").strip() or DEFAULT_BASE_URL
+    api_key   = request.form.get("api_key", "").strip() or DEFAULT_API_KEY
+    model     = request.form.get("model", "").strip() or DEFAULT_MODEL
 
     if not all([base_url, api_key, model]):
-        return jsonify({"error": "请填写 Base URL、API Key 和 Model"}), 400
+        return jsonify({"error": "请填写 Base URL、API Key 和 Model，或配置服务端默认值"}), 400
 
     max_minutes = int(request.form.get("max_minutes", DEFAULT_MAX_CHUNK_MINUTES))
     max_mb      = int(request.form.get("max_mb", DEFAULT_MAX_CHUNK_MB))
+    provider    = request.form.get("provider", "openai")
 
     # Save uploaded file
     task_id = uuid.uuid4().hex[:12]
@@ -255,7 +301,7 @@ def upload():
 
     t = threading.Thread(
         target=run_transcription,
-        args=(task_id, save_path, base_url, api_key, model, max_minutes, max_mb),
+        args=(task_id, save_path, base_url, api_key, model, max_minutes, max_mb, provider),
         daemon=True,
     )
     t.start()
@@ -274,20 +320,35 @@ def status(task_id):
 @app.route("/api/test-connection", methods=["POST"])
 def test_connection():
     data = request.json or {}
-    base_url = data.get("base_url", "").strip()
-    api_key  = data.get("api_key", "").strip()
-    model    = data.get("model", "").strip()
+    base_url = data.get("base_url", "").strip() or DEFAULT_BASE_URL
+    api_key  = data.get("api_key", "").strip() or DEFAULT_API_KEY
+    model    = data.get("model", "").strip() or DEFAULT_MODEL
+    provider = data.get("provider", "openai")
 
     if not all([base_url, api_key, model]):
         return jsonify({"ok": False, "error": "请填写所有配置项"}), 400
 
     try:
-        client = OpenAI(base_url=base_url, api_key=api_key)
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Hi, reply with OK"}],
-            max_tokens=10,
-        )
+        if provider == "zhipu" and ZhipuAI:
+            client = ZhipuAI(api_key=api_key)
+            # Test with a simple chat message
+            resp = client.chat.completions.create(
+                model="glm-4-flash",
+                messages=[{"role": "user", "content": "Hi, reply with OK"}],
+                max_tokens=10,
+            )
+        else:
+            client = OpenAI(base_url=base_url, api_key=api_key)
+            # For ModelScope or others, if the model is an ASR model, use a common LLM for connectivity test
+            test_model = model
+            if provider == "modelscope" and ("sensevoice" in model.lower() or "paraformer" in model.lower()):
+                test_model = "qwen/Qwen2.5-7B-Instruct" # A reliable model on ModelScope for testing
+            
+            resp = client.chat.completions.create(
+                model=test_model,
+                messages=[{"role": "user", "content": "Hi, reply with OK"}],
+                max_tokens=10,
+            )
         return jsonify({"ok": True, "reply": resp.choices[0].message.content})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
