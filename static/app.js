@@ -792,7 +792,7 @@
           const btn = document.createElement("button");
           btn.className = "demo-file-btn";
           btn.innerHTML =
-            `<span>\uD83C\uDFB5</span> ${f.name} <span class="demo-file-size">${f.size_mb} MB</span>`;
+            `<span>\uD83C\uDFB5</span> ${esc(f.name)} <span class="demo-file-size">${f.size_mb} MB</span>`;
           btn.addEventListener("click", () => loadDemoFile(f.name));
           demoFilesGrid.appendChild(btn);
         });
