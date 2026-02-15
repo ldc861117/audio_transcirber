@@ -50,6 +50,7 @@ DEFAULT_BASE_URL = os.environ.get("custom_openai_baseurl", "")
 DEFAULT_API_KEY  = os.environ.get("custom_openai_apikey", "")
 DEFAULT_MODEL    = os.environ.get("custom_openai_model", "")
 TEST_MODE        = os.environ.get("test_mode", "false").lower() == "true"
+SERVER_ENV_SENTINEL = "(server-env)"
 
 DEMO_AUDIO_DIR = Path(__file__).resolve().parent / "demo_audio"
 DEMO_AUDIO_DIR.mkdir(exist_ok=True)
@@ -277,8 +278,9 @@ def upload():
         return jsonify({"error": f"不支持的格式 {ext}，支持: {supported}"}), 400
 
     raw_key = request.form.get("api_key", "").strip()
+    use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
     base_url  = request.form.get("base_url", "").strip() or DEFAULT_BASE_URL
-    api_key   = raw_key if raw_key and raw_key != "(server-env)" else DEFAULT_API_KEY
+    api_key   = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
     model     = request.form.get("model", "").strip() or DEFAULT_MODEL
 
     if not all([base_url, api_key, model]):
@@ -329,8 +331,9 @@ def status(task_id):
 def test_connection():
     data = request.json or {}
     raw_key = data.get("api_key", "").strip()
+    use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
     base_url = data.get("base_url", "").strip() or DEFAULT_BASE_URL
-    api_key  = raw_key if raw_key and raw_key != "(server-env)" else DEFAULT_API_KEY
+    api_key  = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
     model    = data.get("model", "").strip() or DEFAULT_MODEL
     provider = data.get("provider", "openai")
 
