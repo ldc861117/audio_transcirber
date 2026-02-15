@@ -12,6 +12,7 @@ import tempfile
 import threading
 import traceback
 from pathlib import Path
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from pydub import AudioSegment
@@ -20,6 +21,8 @@ try:
     from zhipuai import ZhipuAI
 except ImportError:
     ZhipuAI = None
+
+load_dotenv()
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
@@ -42,10 +45,15 @@ tasks: dict[str, dict] = {}
 DEFAULT_MAX_CHUNK_MINUTES = 10       # minutes per chunk
 DEFAULT_MAX_CHUNK_MB      = 20       # MB per chunk (safe for base64 inline)
 
-# Load optional defaults from environment (for Quick Start)
-DEFAULT_BASE_URL = os.environ.get("DEFAULT_BASE_URL", "")
-DEFAULT_API_KEY  = os.environ.get("DEFAULT_API_KEY", "")
-DEFAULT_MODEL    = os.environ.get("DEFAULT_MODEL", "")
+# Load optional defaults from environment (for Quick Start / Test Mode)
+DEFAULT_BASE_URL = os.environ.get("custom_openai_baseurl", "")
+DEFAULT_API_KEY  = os.environ.get("custom_openai_apikey", "")
+DEFAULT_MODEL    = os.environ.get("custom_openai_model", "")
+TEST_MODE        = os.environ.get("test_mode", "false").lower() == "true"
+SERVER_ENV_SENTINEL = "(server-env)"
+
+DEMO_AUDIO_DIR = Path(__file__).resolve().parent / "demo_audio"
+DEMO_AUDIO_DIR.mkdir(exist_ok=True)
 
 
 # ================================================================
@@ -269,8 +277,10 @@ def upload():
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         return jsonify({"error": f"不支持的格式 {ext}，支持: {supported}"}), 400
 
+    raw_key = request.form.get("api_key", "").strip()
+    use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
     base_url  = request.form.get("base_url", "").strip() or DEFAULT_BASE_URL
-    api_key   = request.form.get("api_key", "").strip() or DEFAULT_API_KEY
+    api_key   = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
     model     = request.form.get("model", "").strip() or DEFAULT_MODEL
 
     if not all([base_url, api_key, model]):
@@ -320,8 +330,10 @@ def status(task_id):
 @app.route("/api/test-connection", methods=["POST"])
 def test_connection():
     data = request.json or {}
+    raw_key = data.get("api_key", "").strip()
+    use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
     base_url = data.get("base_url", "").strip() or DEFAULT_BASE_URL
-    api_key  = data.get("api_key", "").strip() or DEFAULT_API_KEY
+    api_key  = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
     model    = data.get("model", "").strip() or DEFAULT_MODEL
     provider = data.get("provider", "openai")
 
@@ -352,6 +364,35 @@ def test_connection():
         return jsonify({"ok": True, "reply": resp.choices[0].message.content})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/test-config")
+def test_config():
+    demo_files = []
+    if DEMO_AUDIO_DIR.exists():
+        for f in sorted(DEMO_AUDIO_DIR.iterdir()):
+            if f.suffix.lower() in SUPPORTED_EXTENSIONS and not f.name.startswith("."):
+                size_mb = f.stat().st_size / (1024 * 1024)
+                demo_files.append({"name": f.name, "size_mb": round(size_mb, 2)})
+    return jsonify({
+        "test_mode": TEST_MODE,
+        "has_config": bool(DEFAULT_BASE_URL and DEFAULT_API_KEY and DEFAULT_MODEL),
+        "base_url": DEFAULT_BASE_URL if TEST_MODE else "",
+        "model": DEFAULT_MODEL if TEST_MODE else "",
+        "api_key_set": bool(DEFAULT_API_KEY) if TEST_MODE else False,
+        "demo_files": demo_files,
+    })
+
+
+@app.route("/api/demo-file/<path:filename>")
+def serve_demo_file(filename):
+    if not DEMO_AUDIO_DIR.exists():
+        return jsonify({"error": "demo_audio directory not found"}), 404
+    safe_name = Path(filename).name
+    file_path = DEMO_AUDIO_DIR / safe_name
+    if not file_path.exists() or file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        return jsonify({"error": "File not found"}), 404
+    return send_from_directory(str(DEMO_AUDIO_DIR), safe_name)
 
 
 # ================================================================

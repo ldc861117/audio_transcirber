@@ -53,6 +53,12 @@
   const timerETA = $("timerETA");
   const audioPreview = $("audioPreview");
 
+  // ── Test Mode ──
+  const testModeBanner = $("testModeBanner");
+  const demoCard = $("demoCard");
+  const demoFilesGrid = $("demoFilesGrid");
+  const demoHint = $("demoHint");
+
   // ── State ──
   let mediaRecorder = null;
   let recordedChunks = [];
@@ -752,7 +758,65 @@
     }
   });
 
+  // ── Test Mode / Demo Files ─────────────────────────────────
+  async function loadTestConfig() {
+    try {
+      const res = await fetch("/api/test-config");
+      const cfg = await res.json();
+
+      if (cfg.test_mode && cfg.has_config) {
+        testModeBanner.style.display = "flex";
+
+        providerSelect.value = "custom";
+        baseUrlInput.value = cfg.base_url || "";
+        modelInput.value = cfg.model || "";
+        if (cfg.api_key_set) {
+          apiKeyInput.value = "(server-env)";
+          apiKeyInput.placeholder = "Already configured via .env";
+        }
+        pillModel.textContent = cfg.model || "Test Mode";
+        pillDot.classList.add("connected");
+        saveConfig();
+
+        if (!configPanel.classList.contains("collapsed")) {
+          configPanel.classList.add("collapsed");
+          configToggle.classList.remove("active");
+        }
+      }
+
+      if (cfg.demo_files && cfg.demo_files.length > 0) {
+        demoCard.style.display = "block";
+        if (demoHint) demoHint.style.display = "block";
+        demoFilesGrid.innerHTML = "";
+        cfg.demo_files.forEach((f) => {
+          const btn = document.createElement("button");
+          btn.className = "demo-file-btn";
+          btn.innerHTML =
+            `<span>\uD83C\uDFB5</span> ${esc(f.name)} <span class="demo-file-size">${f.size_mb} MB</span>`;
+          btn.addEventListener("click", () => loadDemoFile(f.name));
+          demoFilesGrid.appendChild(btn);
+        });
+      }
+    } catch {
+      // test-config endpoint not available, skip
+    }
+  }
+
+  async function loadDemoFile(filename) {
+    try {
+      const res = await fetch(`/api/demo-file/${encodeURIComponent(filename)}`);
+      if (!res.ok) throw new Error("Failed to fetch demo file");
+      const blob = await res.blob();
+      const file = new File([blob], filename, { type: blob.type });
+      selectFile(file);
+      showToast("\u2705 \u5DF2\u52A0\u8F7D\u6D4B\u8BD5\u97F3\u9891: " + filename, "success");
+    } catch (err) {
+      showToast("\u274C \u52A0\u8F7D\u5931\u8D25: " + err.message, "error");
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────
   loadConfig();
   listDevices();
+  loadTestConfig();
 })();
