@@ -782,6 +782,63 @@ input[type="number"] {
   background: rgba(248, 81, 73, 0.88);
 }
 
+/* ─── Test Mode Banner ─── */
+.test-mode-banner {
+  position: fixed;
+  top: var(--toolbar-h);
+  left: 0;
+  right: 0;
+  padding: 8px 24px;
+  background: rgba(219, 171, 9, 0.12);
+  border-bottom: 1px solid rgba(219, 171, 9, 0.3);
+  color: #dbab09;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 89;
+}
+.test-mode-icon {
+  font-size: 16px;
+}
+
+/* ─── Demo Card ─── */
+.demo-card {
+  border-color: rgba(219, 171, 9, 0.3);
+}
+.demo-files-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.demo-file-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.demo-file-btn:hover {
+  border-color: var(--accent);
+  background: rgba(99, 147, 255, 0.08);
+}
+.demo-file-btn .demo-file-size {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.demo-hint {
+  color: #dbab09;
+  font-weight: 500;
+}
+
 /* ─── Footer ─── */
 .app-footer {
   text-align: center;
