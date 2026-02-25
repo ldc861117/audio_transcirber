@@ -833,7 +833,33 @@
     }
   }
 
+  // ── Auth: Load current user & logout ────────────────────────
+  const currentUsername = $("currentUsername");
+  const logoutBtn = $("logoutBtn");
+
+  async function loadCurrentUser() {
+    try {
+      const res = await fetch("/api/auth/me");
+      if (res.ok) {
+        const data = await res.json();
+        if (currentUsername) currentUsername.textContent = data.username;
+      } else if (res.status === 401) {
+        window.location.href = "/login";
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await fetch("/api/auth/logout", { method: "POST" });
+      } catch { /* ignore */ }
+      window.location.href = "/login";
+    });
+  }
+
   // ── Init ──────────────────────────────────────────────────
+  loadCurrentUser();
   loadConfig();
   listDevices();
   loadTestConfig();

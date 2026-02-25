@@ -17,3 +17,6 @@ demo_audio/*
 # Ignore upload directory if created locally
 uploads/
 audio_transcriber_uploads/
+
+# SQLite user database
+data/

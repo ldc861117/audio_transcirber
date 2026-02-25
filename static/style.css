@@ -839,6 +839,114 @@ input[type="number"] {
   font-weight: 500;
 }
 
+/* ─── Auth Pages ─── */
+.auth-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 40px 32px 32px;
+  box-shadow: var(--shadow);
+}
+.auth-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.auth-header .brand-icon {
+  font-size: 36px;
+  display: block;
+  margin-bottom: 8px;
+}
+.auth-title {
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #e6edf3, var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 4px;
+}
+.auth-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.auth-field {
+  margin-bottom: 16px;
+}
+.auth-field label {
+  display: block;
+  margin-bottom: 6px;
+}
+.auth-field input {
+  width: 100%;
+}
+.auth-error {
+  color: #f85149;
+  font-size: 13px;
+  min-height: 20px;
+  margin-bottom: 8px;
+}
+.auth-submit {
+  width: 100%;
+  padding: 10px;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+.auth-link {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.auth-link a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.auth-link a:hover {
+  text-decoration: underline;
+}
+
+/* ─── Toolbar User Info ─── */
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.user-info .username {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.btn-logout {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-logout:hover {
+  border-color: #f85149;
+  color: #f85149;
+}
+
 /* ─── Footer ─── */
 .app-footer {
   text-align: center;

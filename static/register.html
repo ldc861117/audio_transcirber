@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>注册 — Audio Transcriber</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+  <div class="auth-wrapper">
+    <div class="auth-card">
+      <div class="auth-header">
+        <span class="brand-icon">🎙️</span>
+        <h1 class="auth-title">音频转写</h1>
+        <p class="auth-subtitle">创建新账号</p>
+      </div>
+      <form id="registerForm" autocomplete="on">
+        <div class="auth-field">
+          <label for="username">用户名</label>
+          <input id="username" type="text" placeholder="2-32 个字符" autocomplete="username" required minlength="2"
+            maxlength="32" />
+        </div>
+        <div class="auth-field">
+          <label for="password">密码</label>
+          <input id="password" type="password" placeholder="至少 6 个字符" autocomplete="new-password" required
+            minlength="6" />
+        </div>
+        <div class="auth-field">
+          <label for="password2">确认密码</label>
+          <input id="password2" type="password" placeholder="再次输入密码" autocomplete="new-password" required
+            minlength="6" />
+        </div>
+        <div class="auth-error" id="errorMsg"></div>
+        <button class="btn btn-primary auth-submit" type="submit">注册</button>
+      </form>
+      <p class="auth-link">已有账号？ <a href="/login">登录</a></p>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById("registerForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorMsg = document.getElementById("errorMsg");
+      const btn = e.target.querySelector("button[type=submit]");
+      const password = document.getElementById("password").value;
+      const password2 = document.getElementById("password2").value;
+      errorMsg.textContent = "";
+
+      if (password !== password2) {
+        errorMsg.textContent = "两次密码不一致";
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "注册中...";
+
+      try {
+        const res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("username").value.trim(),
+            password: password,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window.location.href = "/";
+        } else {
+          errorMsg.textContent = data.error || "注册失败";
+        }
+      } catch {
+        errorMsg.textContent = "网络错误，请重试";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "注册";
+      }
+    });
+  </script>
+</body>
+
+</html>
