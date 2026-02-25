@@ -52,6 +52,21 @@ DEFAULT_MODEL    = os.environ.get("custom_openai_model", "")
 TEST_MODE        = os.environ.get("test_mode", "false").lower() == "true"
 SERVER_ENV_SENTINEL = "(server-env)"
 
+# ── Built-in provider configs (API keys from env, rest hardcoded) ────
+BUILTIN_PROVIDERS = {
+    "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-flash",
+        "api_key_env": "GEMINI_API_KEY",
+    },
+}
+
+def _get_builtin_key(provider_name: str) -> str:
+    """Return the API key for a built-in provider, or empty string."""
+    info = BUILTIN_PROVIDERS.get(provider_name, {})
+    env_var = info.get("api_key_env", "")
+    return os.environ.get(env_var, "") if env_var else ""
+
 DEMO_AUDIO_DIR = Path(__file__).resolve().parent / "demo_audio"
 DEMO_AUDIO_DIR.mkdir(exist_ok=True)
 
@@ -150,6 +165,7 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
                     "你是一位拥有 20 年经验的专业会议速记员和纪要专家。"
                     "你的任务是将音频内容转化为“智能逐字稿”（Intelligent Verbatim）。"
                     "核心原则：保持内容的完整性和准确性，同时提升阅读体验。"
+                    "重要：请始终使用简体中文（Simplified Chinese）输出，不要使用繁体中文。"
                 ),
             },
             {
@@ -278,17 +294,27 @@ def upload():
         return jsonify({"error": f"不支持的格式 {ext}，支持: {supported}"}), 400
 
     raw_key = request.form.get("api_key", "").strip()
-    use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
-    base_url  = request.form.get("base_url", "").strip() or DEFAULT_BASE_URL
-    api_key   = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
-    model     = request.form.get("model", "").strip() or DEFAULT_MODEL
+    provider    = request.form.get("provider", "openai")
+
+    # Built-in provider: use hardcoded config + server-side API key
+    builtin = BUILTIN_PROVIDERS.get(provider)
+    if builtin:
+        base_url = builtin["base_url"]
+        model    = request.form.get("model", "").strip() or builtin["model"]
+        api_key  = _get_builtin_key(provider)
+        if not api_key:
+            return jsonify({"error": f"服务端未配置 {builtin['api_key_env']}，请联系管理员"}), 400
+    else:
+        use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
+        base_url  = request.form.get("base_url", "").strip() or DEFAULT_BASE_URL
+        api_key   = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
+        model     = request.form.get("model", "").strip() or DEFAULT_MODEL
 
     if not all([base_url, api_key, model]):
         return jsonify({"error": "请填写 Base URL、API Key 和 Model，或配置服务端默认值"}), 400
 
     max_minutes = int(request.form.get("max_minutes", DEFAULT_MAX_CHUNK_MINUTES))
     max_mb      = int(request.form.get("max_mb", DEFAULT_MAX_CHUNK_MB))
-    provider    = request.form.get("provider", "openai")
 
     # Save uploaded file
     task_id = uuid.uuid4().hex[:12]
@@ -364,6 +390,19 @@ def test_connection():
         return jsonify({"ok": True, "reply": resp.choices[0].message.content})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/builtin-providers")
+def builtin_providers():
+    """Tell the frontend which built-in providers have server-side keys."""
+    available = {}
+    for name, info in BUILTIN_PROVIDERS.items():
+        has_key = bool(_get_builtin_key(name))
+        available[name] = {
+            "available": has_key,
+            "model": info["model"],
+        }
+    return jsonify(available)
 
 
 @app.route("/api/test-config")

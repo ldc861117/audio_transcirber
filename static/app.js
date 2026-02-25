@@ -80,6 +80,12 @@
   const SPEAKER_COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#5856D6"];
 
   const PROVIDERS = {
+    gemini: {
+      url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: "gemini-2.5-flash",
+      link: "https://aistudio.google.com/apikey",
+      serverKey: true,  // API key managed by server
+    },
     aliyun: {
       url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       model: "qwen-audio-turbo",
@@ -122,28 +128,40 @@
     baseUrlInput.disabled = false;
     modelInput.disabled = false;
     apiKeyInput.disabled = false;
+    baseUrlInput.parentElement.style.opacity = "1";
+    apiKeyInput.parentElement.style.opacity = "1";
 
     // Reset placeholders
     baseUrlInput.placeholder = "https://api.example.com/v1";
     modelInput.placeholder = "model-name";
     apiKeyInput.placeholder = "sk-......";
 
-    if (providerInfo && providerInfo.isZhipuSDK) {
+    if (providerInfo && providerInfo.serverKey) {
+      // Built-in provider: server manages base_url and api_key
+      baseUrlInput.parentElement.style.opacity = "0.5";
+      baseUrlInput.value = providerInfo.url;
+      baseUrlInput.disabled = true;
+      apiKeyInput.parentElement.style.opacity = "0.5";
+      apiKeyInput.value = "(server-env)";
+      apiKeyInput.disabled = true;
+      modelInput.value = config.model || providerInfo.model;
+      pillDot.classList.add("connected");
+    } else if (providerInfo && providerInfo.isZhipuSDK) {
       baseUrlInput.parentElement.style.opacity = "0.5";
       baseUrlInput.value = "使用官方 SDK 直连";
       baseUrlInput.disabled = true;
+      modelInput.value = config.model || providerInfo.model;
+      apiKeyInput.value = config.apiKey || "";
     } else {
-      baseUrlInput.parentElement.style.opacity = "1";
       baseUrlInput.value = config.baseUrl || (providerInfo ? providerInfo.url : "");
+      modelInput.value = config.model || (providerInfo ? providerInfo.model : "");
+      apiKeyInput.value = config.apiKey || "";
     }
-
-    modelInput.value = config.model || (providerInfo ? providerInfo.model : "");
-    apiKeyInput.value = config.apiKey || "";
 
     if (providerInfo && providerInfo.link) {
       getKeyLink.href = providerInfo.link;
       getKeyLink.style.display = "inline-block";
-      getKeyLink.textContent = "🔗 去注册领取免费额度";
+      getKeyLink.textContent = providerInfo.serverKey ? "🔗 查看官网" : "🔗 去注册领取免费额度";
     } else {
       getKeyLink.style.display = "none";
     }
@@ -819,4 +837,25 @@
   loadConfig();
   listDevices();
   loadTestConfig();
+
+  // Auto-select Gemini if available and no prior config
+  (async () => {
+    try {
+      const res = await fetch("/api/builtin-providers");
+      const data = await res.json();
+      if (data.gemini && data.gemini.available) {
+        const savedCfg = localStorage.getItem("audioTranscriberConfig");
+        if (!savedCfg) {
+          providerSelect.value = "gemini";
+          updateProviderUI();
+          saveConfig();
+          // Auto-collapse config panel
+          if (!configPanel.classList.contains("collapsed")) {
+            configPanel.classList.add("collapsed");
+            configToggle.classList.remove("active");
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  })();
 })();

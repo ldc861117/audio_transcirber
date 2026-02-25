@@ -8,3 +8,12 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .env
+
+# Local Audio Files - Ignore all audio in demo_audio EXCEPT the sample
+demo_audio/*
+!demo_audio/sample_test.m4a
+!demo_audio/.gitkeep
+
+# Ignore upload directory if created locally
+uploads/
+audio_transcriber_uploads/
