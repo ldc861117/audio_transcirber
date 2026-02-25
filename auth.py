@@ -58,15 +58,6 @@ class User(UserMixin):
         return None
 
     @staticmethod
-    def get_by_username(username: str) -> "User | None":
-        conn = _get_db()
-        row = conn.execute("SELECT id, username FROM users WHERE username = ?", (username,)).fetchone()
-        conn.close()
-        if row:
-            return User(row["id"], row["username"])
-        return None
-
-    @staticmethod
     def authenticate(username: str, password: str) -> "User | None":
         """Return a User if credentials are valid, else None."""
         conn = _get_db()
