@@ -13,8 +13,10 @@ import threading
 import traceback
 from pathlib import Path
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, redirect, url_for
 from flask_cors import CORS
+from flask_login import login_user, logout_user, login_required, current_user
+import sqlite3 as _sqlite3
 from pydub import AudioSegment
 from openai import OpenAI
 try:
@@ -22,10 +24,13 @@ try:
 except ImportError:
     ZhipuAI = None
 
+from auth import setup_auth, User
+
 load_dotenv()
 
 app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app)
+CORS(app, origins=["http://localhost:5099"])
+setup_auth(app)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -38,8 +43,9 @@ SUPPORTED_EXTENSIONS = {
     ".mp4", ".mov", ".mkv",  # video files with audio track
 }
 
-# In-memory task store  {task_id: {...}}
-tasks: dict[str, dict] = {}
+# In-memory task store  {user_id: {task_id: {...}}}
+# Scoped per user so each user only sees their own tasks.
+tasks: dict[int, dict[str, dict]] = {}
 
 # ── defaults (overridable per-request) ──────────────────────────
 DEFAULT_MAX_CHUNK_MINUTES = 10       # minutes per chunk
@@ -213,9 +219,10 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
 
 def run_transcription(task_id: str, filepath: str,
                       base_url: str, api_key: str, model: str,
-                      max_minutes: int, max_mb: int, provider: str = "openai"):
+                      max_minutes: int, max_mb: int, provider: str = "openai",
+                      user_id: int = 0):
     """Background worker: split → transcribe → merge."""
-    task = tasks[task_id]
+    task = tasks[user_id][task_id]
     try:
         # ── 1. Split ────────────────────────────────────────────
         task["status"] = "splitting"
@@ -277,12 +284,90 @@ def run_transcription(task_id: str, filepath: str,
 #  Routes
 # ================================================================
 
+# ================================================================
+#  Auth Routes
+# ================================================================
+
+@app.route("/login")
+def login_page():
+    if current_user.is_authenticated:
+        return redirect("/")
+    return send_from_directory("static", "login.html")
+
+
+@app.route("/register")
+def register_page():
+    if current_user.is_authenticated:
+        return redirect("/")
+    return send_from_directory("static", "register.html")
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def api_register():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify({"error": "请填写用户名和密码"}), 400
+    if len(username) < 2 or len(username) > 32:
+        return jsonify({"error": "用户名长度需在 2-32 个字符之间"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "密码长度至少 6 个字符"}), 400
+    if User.username_exists(username):
+        return jsonify({"error": "用户名已被注册"}), 409
+
+    try:
+        user = User.create(username, password)
+    except _sqlite3.IntegrityError:
+        return jsonify({"error": "用户名已被注册"}), 409
+
+    login_user(user, remember=True)
+    return jsonify({"ok": True, "username": user.username})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_login():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify({"error": "请填写用户名和密码"}), 400
+
+    user = User.authenticate(username, password)
+    if not user:
+        return jsonify({"error": "用户名或密码错误"}), 401
+
+    login_user(user, remember=True)
+    return jsonify({"ok": True, "username": user.username})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@login_required
+def api_logout():
+    logout_user()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth/me")
+@login_required
+def api_me():
+    return jsonify({"username": current_user.username})
+
+
+# ================================================================
+#  App Routes
+# ================================================================
+
 @app.route("/")
+@login_required
 def index():
     return send_from_directory("static", "index.html")
 
 
 @app.route("/api/upload", methods=["POST"])
+@login_required
 def upload():
     file = request.files.get("audio")
     if not file:
@@ -323,7 +408,11 @@ def upload():
 
     file_size_mb = os.path.getsize(save_path) / (1024 * 1024)
 
-    tasks[task_id] = {
+    uid = current_user.id
+    if uid not in tasks:
+        tasks[uid] = {}
+
+    tasks[uid][task_id] = {
         "status": "queued",
         "filename": file.filename,
         "file_size_mb": round(file_size_mb, 2),
@@ -337,7 +426,7 @@ def upload():
 
     t = threading.Thread(
         target=run_transcription,
-        args=(task_id, save_path, base_url, api_key, model, max_minutes, max_mb, provider),
+        args=(task_id, save_path, base_url, api_key, model, max_minutes, max_mb, provider, uid),
         daemon=True,
     )
     t.start()
@@ -346,14 +435,17 @@ def upload():
 
 
 @app.route("/api/status/<task_id>")
+@login_required
 def status(task_id):
-    task = tasks.get(task_id)
+    user_tasks = tasks.get(current_user.id, {})
+    task = user_tasks.get(task_id)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
     return jsonify(task)
 
 
 @app.route("/api/test-connection", methods=["POST"])
+@login_required
 def test_connection():
     data = request.json or {}
     raw_key = data.get("api_key", "").strip()
@@ -393,6 +485,7 @@ def test_connection():
 
 
 @app.route("/api/builtin-providers")
+@login_required
 def builtin_providers():
     """Tell the frontend which built-in providers have server-side keys."""
     available = {}
@@ -406,6 +499,7 @@ def builtin_providers():
 
 
 @app.route("/api/test-config")
+@login_required
 def test_config():
     demo_files = []
     if DEMO_AUDIO_DIR.exists():
@@ -424,6 +518,7 @@ def test_config():
 
 
 @app.route("/api/demo-file/<path:filename>")
+@login_required
 def serve_demo_file(filename):
     if not DEMO_AUDIO_DIR.exists():
         return jsonify({"error": "demo_audio directory not found"}), 404
