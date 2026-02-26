@@ -5,6 +5,7 @@ Provides SQLite-backed user storage and Flask-Login integration.
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from flask_login import LoginManager, UserMixin
@@ -16,28 +17,31 @@ DB_DIR.mkdir(exist_ok=True)
 DB_PATH = DB_DIR / "users.db"
 
 
-def _get_db() -> sqlite3.Connection:
-    """Return a connection to the users database."""
+@contextmanager
+def _get_db():
+    """Yield a connection to the users database, ensuring it is always closed."""
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
     """Create the users table if it does not exist."""
-    conn = _get_db()
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            username    TEXT    NOT NULL UNIQUE,
-            password    TEXT    NOT NULL,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    with _get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                username    TEXT    NOT NULL UNIQUE,
+                password    TEXT    NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 # ── User model ─────────────────────────────────────────────────
@@ -50,9 +54,8 @@ class User(UserMixin):
 
     @staticmethod
     def get_by_id(user_id: int) -> "User | None":
-        conn = _get_db()
-        row = conn.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
-        conn.close()
+        with _get_db() as conn:
+            row = conn.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
         if row:
             return User(row["id"], row["username"])
         return None
@@ -60,32 +63,32 @@ class User(UserMixin):
     @staticmethod
     def authenticate(username: str, password: str) -> "User | None":
         """Return a User if credentials are valid, else None."""
-        conn = _get_db()
-        row = conn.execute("SELECT id, username, password FROM users WHERE username = ?", (username,)).fetchone()
-        conn.close()
+        with _get_db() as conn:
+            row = conn.execute("SELECT id, username, password FROM users WHERE username = ?", (username,)).fetchone()
         if row and check_password_hash(row["password"], password):
             return User(row["id"], row["username"])
         return None
 
     @staticmethod
     def create(username: str, password: str) -> "User":
-        """Insert a new user and return the User object."""
+        """Insert a new user and return the User object.
+
+        Raises sqlite3.IntegrityError if the username already exists.
+        """
         hashed = generate_password_hash(password)
-        conn = _get_db()
-        cursor = conn.execute(
-            "INSERT INTO users (username, password) VALUES (?, ?)",
-            (username, hashed),
-        )
-        conn.commit()
-        user_id = cursor.lastrowid
-        conn.close()
+        with _get_db() as conn:
+            cursor = conn.execute(
+                "INSERT INTO users (username, password) VALUES (?, ?)",
+                (username, hashed),
+            )
+            conn.commit()
+            user_id = cursor.lastrowid
         return User(user_id, username)
 
     @staticmethod
     def username_exists(username: str) -> bool:
-        conn = _get_db()
-        row = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
-        conn.close()
+        with _get_db() as conn:
+            row = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
         return row is not None
 
 
@@ -96,7 +99,10 @@ login_manager.login_view = "login_page"
 
 @login_manager.user_loader
 def load_user(user_id: str) -> User | None:
-    return User.get_by_id(int(user_id))
+    try:
+        return User.get_by_id(int(user_id))
+    except (ValueError, TypeError):
+        return None
 
 
 def setup_auth(app) -> None:

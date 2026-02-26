@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, redirect, url_for
 from flask_cors import CORS
 from flask_login import login_user, logout_user, login_required, current_user
+import sqlite3 as _sqlite3
 from pydub import AudioSegment
 from openai import OpenAI
 try:
@@ -28,7 +29,7 @@ from auth import setup_auth, User
 load_dotenv()
 
 app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app)
+CORS(app, origins=["http://localhost:5099"])
 setup_auth(app)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
@@ -316,7 +317,11 @@ def api_register():
     if User.username_exists(username):
         return jsonify({"error": "用户名已被注册"}), 409
 
-    user = User.create(username, password)
+    try:
+        user = User.create(username, password)
+    except _sqlite3.IntegrityError:
+        return jsonify({"error": "用户名已被注册"}), 409
+
     login_user(user, remember=True)
     return jsonify({"ok": True, "username": user.username})
 
