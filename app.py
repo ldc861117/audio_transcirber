@@ -35,8 +35,17 @@ from speaker import (
 load_dotenv()
 
 app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app, origins=["http://localhost:5099"])
+CORS(app, origins=["http://localhost:5099", "http://localhost:3000"])
 setup_auth(app)
+
+# ── Phase 1 Blueprints ────────────────────────────────────
+from routes.task_routes import task_bp
+from routes.plan_routes import plan_bp
+from routes.export_routes import export_bp
+
+app.register_blueprint(task_bp)
+app.register_blueprint(plan_bp)
+app.register_blueprint(export_bp)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
