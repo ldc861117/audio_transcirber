@@ -1,0 +1,143 @@
+# ============================================================
+# Shared Contracts — Audio Transcriber Product Phase 1
+# ============================================================
+# This file defines all shared data structures and interface
+# contracts for parallel development tracks.
+# ALL Tracks must read and conform to these definitions.
+# NO Track should modify this file.
+# ============================================================
+
+# ── Task & Transcription ────────────────────────────────────
+
+task_status_enum:
+  - queued
+  - splitting
+  - transcribing
+  - diarizing
+  - done
+  - error
+
+transcription_record:
+  description: "Persisted transcription result (Track A owns storage)"
+  fields:
+    id: { type: string, required: true }
+    user_id: { type: integer, required: true }
+    filename: { type: string, required: true }
+    file_size_mb: { type: float, required: true }
+    transcript: { type: string, default: "" }
+    status: { type: string, enum_ref: task_status_enum, default: "queued" }
+    created_at: { type: datetime, required: true }
+    updated_at: { type: datetime, required: true }
+    enable_diarization: { type: boolean, default: false }
+    speakers_json:
+      {
+        type: string,
+        default: "",
+        description: "JSON-serialized speaker results",
+      }
+    error: { type: string, default: "" }
+    provider: { type: string, default: "" }
+    model: { type: string, default: "" }
+    chunk_count: { type: integer, default: 0 }
+    duration_seconds: { type: float, default: 0.0 }
+
+# ── Plan & Quota ────────────────────────────────────────────
+
+plan_tier_enum:
+  - free
+  - basic
+  - pro
+
+plan_definitions:
+  free:
+    display_name: "免费版"
+    monthly_minutes: 60
+    max_single_minutes: 30
+    features:
+      diarization: false
+      export_formats: [txt, md]
+  basic:
+    display_name: "基础版"
+    monthly_minutes: 300
+    max_single_minutes: 120
+    features:
+      diarization: true
+      export_formats: [txt, md, srt]
+  pro:
+    display_name: "专业版"
+    monthly_minutes: -1 # unlimited
+    max_single_minutes: -1 # unlimited
+    features:
+      diarization: true
+      export_formats: [txt, md, srt, docx, pdf]
+
+user_plan:
+  description: "User's subscription plan (Track B owns)"
+  fields:
+    user_id: { type: integer, required: true }
+    tier: { type: string, enum_ref: plan_tier_enum, default: "free" }
+    monthly_minutes: { type: integer }
+    used_minutes: { type: float, default: 0.0 }
+    expires_at: { type: datetime, nullable: true }
+
+quota_usage:
+  description: "Per-request quota tracking"
+  fields:
+    id: { type: integer, auto: true }
+    user_id: { type: integer, required: true }
+    task_id: { type: string, required: true }
+    minutes_used: { type: float, required: true }
+    created_at: { type: datetime, required: true }
+
+# ── Provider Config ─────────────────────────────────────────
+
+provider_config:
+  description: "API provider configuration (Track C owns)"
+  fields:
+    name: { type: string, required: true }
+    base_url: { type: string, required: true }
+    model: { type: string, required: true }
+    max_input_mb: { type: float, description: "Model-specific file size limit" }
+    max_input_minutes:
+      { type: float, description: "Model-specific audio duration limit" }
+    api_key_env: { type: string, default: "" }
+
+# ── Export ──────────────────────────────────────────────────
+
+export_format_enum:
+  - txt
+  - md
+  - srt
+  - docx
+  - pdf
+
+# ── API Route Conventions ──────────────────────────────────
+
+api_routes:
+  description: "All new routes MUST use Flask Blueprints"
+  prefix: "/api/v1"
+  blueprints:
+    transcriptions:
+      prefix: "/transcriptions"
+      owner: "Track A"
+    plans:
+      prefix: "/plans"
+      owner: "Track B"
+    export:
+      prefix: "/export"
+      owner: "Track E"
+
+# ── Conventions ────────────────────────────────────────────
+
+conventions:
+  database:
+    engine: "SQLite"
+    location: "data/"
+    naming: "snake_case for tables and columns"
+  error_response:
+    format: '{"error": "message"}'
+    status_codes: [400, 401, 403, 404, 409, 500]
+  auth:
+    method: "Flask-Login (existing)"
+    decorator: "@login_required"
+    user_id_access: "current_user.id"
