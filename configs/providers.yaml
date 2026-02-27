@@ -1,0 +1,42 @@
+providers:
+  gemini:
+    display_name: "Google Gemini"
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+    models:
+      gemini-2.5-flash:
+        max_input_mb: 20
+        max_input_minutes: 15
+      gemini-3-flash-preview:
+        max_input_mb: 100
+        max_input_minutes: 120 # 2小时，几乎不需要切分
+    default_model: "gemini-2.5-flash"
+    api_key_env: "GEMINI_API_KEY"
+
+  zhipu:
+    display_name: "智谱 AI"
+    base_url: ""
+    models:
+      glm-asr-2512:
+        max_input_mb: 25
+        max_input_minutes: 30
+      glm-4.6v-flash:
+        max_input_mb: 20
+        max_input_minutes: 15
+    default_model: "glm-asr-2512"
+    api_key_env: "ZHIPU_API_KEY"
+    is_sdk: true
+
+  modelscope:
+    display_name: "ModelScope (魔搭)"
+    base_url: "https://api-inference.modelscope.ai/v1"
+    models:
+      iic/SenseVoiceSmall:
+        max_input_mb: 20
+        max_input_minutes: 10
+    default_model: "iic/SenseVoiceSmall"
+
+  custom:
+    display_name: "自定义"
+    base_url: ""
+    models: {}
+    default_model: ""

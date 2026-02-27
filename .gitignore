@@ -20,3 +20,6 @@ audio_transcriber_uploads/
 
 # SQLite user database
 data/
+node_modules/
+frontend/dist/
+frontend/node_modules/
