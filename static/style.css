@@ -975,6 +975,156 @@ input[type="number"] {
   margin: 0 6px;
 }
 
+/* ─── Diarization Toggle ─── */
+.diarize-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  transition: all 0.2s;
+  font-size: 13px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.diarize-toggle:hover {
+  border-color: var(--accent);
+}
+.diarize-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+.diarize-toggle input:checked ~ .diarize-label {
+  color: var(--accent);
+}
+.diarize-label {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ─── Speaker Card ─── */
+.speaker-card {
+  border-color: rgba(99, 147, 255, 0.3);
+}
+.speaker-result-item {
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border-radius: 0 8px 8px 0;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.2s;
+}
+.speaker-result-item:last-child {
+  margin-bottom: 0;
+}
+.speaker-result-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.speaker-result-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.speaker-name-input {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  width: 160px;
+  transition: border-color 0.2s;
+}
+.speaker-name-input:focus {
+  border-color: var(--accent);
+}
+.match-hint {
+  font-size: 12px;
+  font-weight: 500;
+}
+.speaker-result-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.speaker-clips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.btn-clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.btn-clip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.speaker-clips audio {
+  display: none;
+}
+
+/* ─── Speaker Library ─── */
+.speaker-library-card {
+  border-color: rgba(175, 82, 222, 0.3);
+}
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.library-item {
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  border-radius: 0 8px 8px 0;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.2s;
+}
+.library-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.library-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.library-item-actions {
+  display: flex;
+  gap: 4px;
+}
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.library-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 600px) {
   .toolbar {

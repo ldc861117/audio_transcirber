@@ -79,6 +79,16 @@
 
   const SPEAKER_COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#5856D6"];
 
+  // Speaker-related state
+  const speakerCard = $("speakerCard");
+  const speakerResults = $("speakerResults");
+  const saveSpeakersBtn = $("saveSpeakersBtn");
+  const speakerLibraryCard = $("speakerLibraryCard");
+  const libraryList = $("libraryList");
+  const refreshLibraryBtn = $("refreshLibraryBtn");
+  let lastTaskId = null;
+  let lastSpeakers = [];
+
   const PROVIDERS = {
     gemini: {
       url: "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -519,6 +529,7 @@
     form.append("api_key", apiKeyInput.value);
     form.append("model", modelInput.value);
     form.append("provider", providerSelect.value || 'openai');
+    form.append("enable_diarization", $("diarizeToggle").checked ? "true" : "false");
 
     try {
       const res = await fetch("/api/upload", { method: "POST", body: form });
@@ -563,7 +574,12 @@
         const res = await fetch(`/api/status/${currentTaskId}`);
         const d = await res.json();
         updateProgress(d);
-        if (d.status === "done") {
+        if (d.status === "diarizing") {
+          statusBadge.textContent = "识别说话人";
+          statusBadge.className = "status-badge";
+          progressText.textContent = "正在分析说话人声纹...";
+          progressBar.style.width = "95%";
+        } else if (d.status === "done") {
           clearInterval(pollTimer);
           pollTimer = null;
           stopTimer();
@@ -573,6 +589,15 @@
           progressBar.style.width = "100%";
           renderTranscript(d.transcript || "");
           resultCard.style.display = "block";
+
+          // Speaker results
+          if (d.speakers && d.speakers.length > 0) {
+            lastTaskId = currentTaskId;
+            lastSpeakers = d.speakers;
+            renderSpeakerResults(d.speakers);
+            speakerCard.style.display = "block";
+          }
+
           currentTaskId = null;
         } else if (d.status === "error") {
           clearInterval(pollTimer);
@@ -705,11 +730,14 @@
     }
     selectedFile = null;
     currentTaskId = null;
+    lastTaskId = null;
+    lastSpeakers = [];
     fileInput.value = "";
     if (pollTimer) clearInterval(pollTimer);
     stopTimer();
     progressCard.style.display = "none";
     resultCard.style.display = "none";
+    speakerCard.style.display = "none";
     fileInfo.style.display = "none";
     dropContent.style.display = "flex";
     dropZone.classList.remove("file-selected");
@@ -717,6 +745,7 @@
     progressBar.className = "progress-bar";
     chunksGrid.innerHTML = "";
     transcriptOutput.innerHTML = "";
+    speakerResults.innerHTML = "";
     timerDisplay.textContent = "0:00";
     timerETA.textContent = "";
     progressText.textContent = "等待开始...";
@@ -884,4 +913,183 @@
       }
     } catch { /* ignore */ }
   })();
+
+  // ── Speaker Results Rendering ──────────────────────────────
+  function renderSpeakerResults(speakers) {
+    speakerResults.innerHTML = "";
+    speakers.forEach((s, idx) => {
+      const color = SPEAKER_COLORS[idx % SPEAKER_COLORS.length];
+      const card = document.createElement("div");
+      card.className = "speaker-result-item";
+      card.style.borderLeftColor = color;
+
+      const nameVal = s.matched_name || s.label;
+      const matchHint = s.matched_name
+        ? `<span class="match-hint" style="color:${color}">🔗 匹配: ${esc(s.matched_name)} (${Math.round(s.match_similarity * 100)}%)</span>`
+        : "";
+
+      let clipsHtml = "";
+      if (s.clips && s.clips.length > 0) {
+        clipsHtml = s.clips.map(c =>
+          `<button class="btn-clip" onclick="this.nextElementSibling.paused ? this.nextElementSibling.play() : this.nextElementSibling.pause()">
+            ▶ ${c.duration}s
+          </button>
+          <audio src="/api/clips/${c.filename}" preload="none"></audio>`
+        ).join(" ");
+      }
+
+      card.innerHTML = `
+        <div class="speaker-result-header">
+          <span class="speaker-chip" style="background:${color}22;color:${color}">${esc(s.label)}</span>
+          <input class="speaker-name-input" data-label="${esc(s.label)}" value="${esc(nameVal)}" placeholder="输入名称..." />
+          ${matchHint}
+        </div>
+        <div class="speaker-result-meta">
+          <span>📊 ${s.segment_count} 段 · ${s.total_duration}s</span>
+          <span>${s.has_embedding ? "✅ 声纹已提取" : "⚠️ 音频太短"}</span>
+        </div>
+        <div class="speaker-clips">${clipsHtml}</div>
+      `;
+      speakerResults.appendChild(card);
+    });
+  }
+
+  // ── Save Speakers ──────────────────────────────────────────
+  saveSpeakersBtn.addEventListener("click", async () => {
+    if (!lastTaskId || !lastSpeakers.length) {
+      showToast("⚠️ 没有可保存的说话人", "error");
+      return;
+    }
+
+    const speakerData = [];
+    speakerResults.querySelectorAll(".speaker-name-input").forEach(input => {
+      const label = input.dataset.label;
+      const name = input.value.trim() || label;
+      const sp = lastSpeakers.find(s => s.label === label);
+      speakerData.push({
+        label,
+        name,
+        matched_profile_id: sp?.matched_profile_id || null,
+      });
+    });
+
+    try {
+      saveSpeakersBtn.disabled = true;
+      saveSpeakersBtn.textContent = "⏳ 保存中...";
+      const res = await fetch("/api/speakers/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: lastTaskId, speakers: speakerData }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        // Refresh transcript with actual speaker names
+        if (data.transcript) {
+          renderTranscript(data.transcript);
+        }
+        const created = data.saved.filter(s => s.action === "created").length;
+        const updated = data.saved.filter(s => s.action === "updated").length;
+        let msg = "✅ ";
+        if (created > 0) msg += `新增 ${created} 个`;
+        if (created > 0 && updated > 0) msg += "，";
+        if (updated > 0) msg += `更新 ${updated} 个`;
+        msg += " 说话人";
+        showToast(msg, "success");
+        loadSpeakerLibrary();
+      } else {
+        showToast("❌ " + (data.error || "保存失败"), "error");
+      }
+    } catch (err) {
+      showToast("❌ 保存失败: " + err.message, "error");
+    } finally {
+      saveSpeakersBtn.disabled = false;
+      saveSpeakersBtn.textContent = "💾 保存到声纹库";
+    }
+  });
+
+  // ── Speaker Library ────────────────────────────────────────
+  async function loadSpeakerLibrary() {
+    try {
+      const res = await fetch("/api/speakers");
+      if (!res.ok) return;
+      const profiles = await res.json();
+      if (!profiles.length) {
+        speakerLibraryCard.style.display = "none";
+        return;
+      }
+
+      speakerLibraryCard.style.display = "block";
+      libraryList.innerHTML = "";
+
+      profiles.forEach((p, idx) => {
+        const color = SPEAKER_COLORS[idx % SPEAKER_COLORS.length];
+        const item = document.createElement("div");
+        item.className = "library-item";
+        item.style.borderLeftColor = color;
+
+        let clipsHtml = "";
+        if (p.clips && p.clips.length > 0) {
+          clipsHtml = p.clips.map(c =>
+            `<button class="btn-clip" onclick="this.nextElementSibling.paused ? this.nextElementSibling.play() : this.nextElementSibling.pause()">▶ ${c.duration}s</button>
+             <audio src="/api/speakers/${p.id}/clips/${c.filename}" preload="none"></audio>`
+          ).join(" ");
+        }
+
+        item.innerHTML = `
+          <div class="library-item-header">
+            <span class="speaker-chip" style="background:${color}22;color:${color}">${esc(p.name)}</span>
+            <div class="library-item-actions">
+              <button class="btn btn-ghost btn-xs" data-action="rename" data-id="${p.id}" title="重命名">✏️</button>
+              <button class="btn btn-ghost btn-xs" data-action="delete" data-id="${p.id}" title="删除">🗑️</button>
+            </div>
+          </div>
+          <div class="library-item-meta">
+            <span>创建: ${p.created_at ? new Date(p.created_at).toLocaleDateString() : "未知"}</span>
+          </div>
+          <div class="speaker-clips">${clipsHtml}</div>
+        `;
+        libraryList.appendChild(item);
+      });
+
+      // Wire up rename/delete buttons
+      libraryList.querySelectorAll("[data-action=rename]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          const name = prompt("输入新名称:");
+          if (!name) return;
+          try {
+            await fetch(`/api/speakers/${id}/name`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name }),
+            });
+            showToast("✅ 已重命名", "success");
+            loadSpeakerLibrary();
+          } catch {
+            showToast("❌ 重命名失败", "error");
+          }
+        });
+      });
+
+      libraryList.querySelectorAll("[data-action=delete]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          if (!confirm("确定要删除此说话人吗？")) return;
+          try {
+            await fetch(`/api/speakers/${id}`, { method: "DELETE" });
+            showToast("✅ 已删除", "success");
+            loadSpeakerLibrary();
+          } catch {
+            showToast("❌ 删除失败", "error");
+          }
+        });
+      });
+
+    } catch { /* ignore */ }
+  }
+
+  refreshLibraryBtn.addEventListener("click", () => loadSpeakerLibrary());
+
+  // Load library on init
+  loadSpeakerLibrary();
 })();

@@ -172,6 +172,10 @@
             </div>
           </div>
           <div class="file-actions">
+            <label class="diarize-toggle" title="启用说话人识别（需要更多处理时间）">
+              <input type="checkbox" id="diarizeToggle" />
+              <span class="diarize-label">🗣️ 说话人识别</span>
+            </label>
             <button class="btn btn-ghost btn-sm" id="cancelFileBtn">✕</button>
             <button class="btn btn-primary" id="startBtn">🚀 开始转写</button>
           </div>
@@ -212,6 +216,30 @@
         <div class="transcript-output" id="transcriptOutput"></div>
       </div>
       <div class="card-footer"><button class="btn btn-primary" id="newTaskBtn">🔄 开始新任务</button></div>
+    </section>
+
+    <!-- Speaker Results (shown after diarization) -->
+    <section class="card speaker-card" id="speakerCard" style="display:none">
+      <div class="card-header">
+        <span>🗣️ 说话人识别结果</span>
+        <div class="result-actions">
+          <button class="btn btn-primary btn-sm" id="saveSpeakersBtn">💾 保存到声纹库</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="speaker-results" id="speakerResults"></div>
+      </div>
+    </section>
+
+    <!-- Speaker Library -->
+    <section class="card speaker-library-card" id="speakerLibraryCard" style="display:none">
+      <div class="card-header">
+        <span>📚 声纹库</span>
+        <button class="btn btn-ghost btn-sm" id="refreshLibraryBtn">🔄 刷新</button>
+      </div>
+      <div class="card-body">
+        <div class="library-list" id="libraryList"></div>
+      </div>
     </section>
   </main>
 
