@@ -77,7 +77,7 @@ SERVER_ENV_SENTINEL = "(server-env)"
 BUILTIN_PROVIDERS = {
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-3-flash-preview",
         "api_key_env": "GEMINI_API_KEY",
     },
 }

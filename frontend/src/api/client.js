@@ -38,7 +38,9 @@ export const api = {
   },
   speakers: {
     list: () => client.get('/speakers'),
-    save: (data) => client.post('/speakers/save', data),
+    rename: (id, name) => client.post(`/speakers/${id}/name`, { name }),
+    delete: (id) => client.delete(`/speakers/${id}`),
+    merge: (keepId, mergeId) => client.post('/speakers/merge', { keep_id: keepId, merge_id: mergeId }),
   }
 };
 
