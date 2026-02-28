@@ -21,6 +21,20 @@ button {
   transition: var(--transition);
 }
 
+button:active {
+  transform: scale(0.98);
+}
+
+.hover-bright:hover {
+  filter: brightness(1.2);
+  color: var(--text-primary) !important;
+}
+
+.sidebar-link:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary) !important;
+}
+
 .btn-primary {
   background: var(--accent-gradient);
   color: white;
