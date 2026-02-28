@@ -1,0 +1,103 @@
+# =============================================================================
+# Jules AI Agent Bridge — Triggered by Linear labels via GitHub Sync
+# =============================================================================
+# This workflow bridges Linear → GitHub → Jules:
+#   1. Linear issue gets labeled (e.g., J-Execute, J-Plan, J-Review)
+#   2. Linear syncs the issue + labels to GitHub
+#   3. This Action detects the label and @mentions Jules with a contextual prompt
+#
+# Supported labels:
+#   - J-Execute  → Jules implements the task
+#   - J-Plan     → Jules creates an implementation plan
+#   - J-Review   → Jules reviews code/PR
+# =============================================================================
+
+name: Jules Agent Bridge
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  invoke-jules:
+    runs-on: ubuntu-latest
+
+    # Only trigger for Jules-related labels
+    if: >
+      github.event.label.name == 'J-Execute' ||
+      github.event.label.name == 'J-Plan' ||
+      github.event.label.name == 'J-Review'
+
+    steps:
+      - name: Determine Jules prompt
+        id: prompt
+        run: |
+          LABEL="${{ github.event.label.name }}"
+          TITLE="${{ github.event.issue.title }}"
+          BODY="${{ github.event.issue.body }}"
+
+          case "$LABEL" in
+            "J-Execute")
+              PROMPT="@jules Please implement the following task.
+
+          **Task**: ${TITLE}
+
+          **Instructions**:
+          1. Read the task description and any referenced documents carefully.
+          2. Follow the project conventions defined in \`AGENTS.md\`.
+          3. Create a feature branch named \`jules/<short-description>\`.
+          4. Implement the changes with proper tests.
+          5. Submit a Pull Request when done.
+
+          **Task Details**:
+          ${BODY}"
+              ;;
+            "J-Plan")
+              PROMPT="@jules Please create an implementation plan for the following task. Do NOT write code yet.
+
+          **Task**: ${TITLE}
+
+          **Instructions**:
+          1. Analyze the requirements described below.
+          2. Review the existing codebase architecture (\`AGENTS.md\`, \`docs/\`).
+          3. Propose a step-by-step implementation plan with:
+             - Files to create/modify
+             - Key design decisions
+             - Potential risks or conflicts
+          4. Wait for approval before proceeding.
+
+          **Task Details**:
+          ${BODY}"
+              ;;
+            "J-Review")
+              PROMPT="@jules Please review the code changes associated with this issue.
+
+          **Task**: ${TITLE}
+
+          **Instructions**:
+          1. Check for correctness, edge cases, and adherence to project conventions.
+          2. Verify test coverage.
+          3. Suggest improvements if any.
+
+          **Task Details**:
+          ${BODY}"
+              ;;
+          esac
+
+          # Write prompt to file to avoid escaping issues
+          echo "$PROMPT" > /tmp/jules_prompt.txt
+
+      - name: Comment on issue to invoke Jules
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body-path: /tmp/jules_prompt.txt
+
+      - name: Add acknowledgment label
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          labels: agent-dispatched
+          number: ${{ github.event.issue.number }}
