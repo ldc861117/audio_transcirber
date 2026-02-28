@@ -43,6 +43,8 @@ export const api = {
     rename: (id, name) => client.post(`/speakers/${id}/name`, { name }),
     delete: (id) => client.delete(`/speakers/${id}`),
     merge: (keepId, mergeId) => client.post('/speakers/merge', { keep_id: keepId, merge_id: mergeId }),
+    updateTaskSpeakers: (taskId, speakers, saveToLibrary = false) =>
+      client.post(`/v1/transcriptions/${taskId}/speakers`, { speakers, save_to_library: saveToLibrary }),
   },
   exports: {
     download: (taskId, format) => client.get(`/v1/export/${taskId}`, {
