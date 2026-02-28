@@ -1,5 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { api } from '../../api/client';
+import {
+  Mic,
+  Circle,
+  Square,
+  AlertCircle,
+  Settings2,
+  Volume2,
+  Save,
+  CheckCircle2,
+  Loader2
+} from 'lucide-react';
 
 const Recorder = ({ onRecorded, onSaved }) => {
   const [recording, setRecording] = useState(false);
@@ -277,62 +288,94 @@ const Recorder = ({ onRecorded, onSaved }) => {
 
   return (
     <div style={{
-      borderRadius: '12px',
-      border: recording ? '2px solid #ff3b30' : '2px solid var(--border)',
-      padding: '1.25rem 1.5rem',
+      borderRadius: '16px',
+      border: recording ? '2px solid var(--error)' : '1px solid var(--bg-tertiary)',
+      padding: '1.5rem',
       marginBottom: '1.5rem',
-      backgroundColor: recording ? 'rgba(255,59,48,0.04)' : 'var(--bg-secondary)',
-      transition: 'all 0.3s ease',
+      backgroundColor: recording ? 'rgba(239,68,68,0.04)' : 'var(--bg-secondary)',
+      transition: 'var(--transition)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: recording ? '0.75rem' : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: recording ? '1rem' : 0, flexWrap: 'wrap', gap: '1rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ fontSize: '1.3rem' }}>🎙️</span>
-          <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>实时录制</span>
-          {recording && (
-            <span style={{
-              padding: '2px 10px', borderRadius: '12px', fontSize: '0.8rem',
-              fontWeight: 600, fontVariantNumeric: 'tabular-nums',
-              backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff3b30',
-              animation: 'pulse 1.5s ease-in-out infinite',
-            }}>
-              ● {formatTime(elapsed)}
-            </span>
-          )}
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '50%',
+            backgroundColor: recording ? 'var(--error)' : 'var(--bg-tertiary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white'
+          }}>
+            <Mic size={20} className={recording ? 'animate-pulse' : ''} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '1rem' }}>实时录制</div>
+            {recording ? (
+              <div style={{
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                color: 'var(--error)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                marginTop: '0.1rem'
+              }}>
+                <span className="animate-pulse">●</span> {formatTime(elapsed)}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                支持混合麦克风与系统音轨
+              </div>
+            )}
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           {!recording && mics.length > 0 && (
-            <select
-              value={selectedMic}
-              onChange={e => setSelectedMic(e.target.value)}
-              style={{
-                padding: '4px 8px', fontSize: '0.8rem', borderRadius: '6px',
-                border: '1px solid var(--border)', backgroundColor: 'var(--bg-primary)',
-                color: 'var(--text-primary)', maxWidth: '200px',
-              }}
-            >
-              {mics.map(m => (
-                <option key={m.deviceId} value={m.deviceId}>
-                  {m.label || '默认麦克风'}
-                </option>
-              ))}
-            </select>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Settings2 size={14} style={{ position: 'absolute', left: '10px', color: 'var(--text-secondary)' }} />
+              <select
+                value={selectedMic}
+                onChange={e => setSelectedMic(e.target.value)}
+                style={{
+                  padding: '6px 12px 6px 30px',
+                  fontSize: '0.85rem',
+                  borderRadius: '10px',
+                  border: '1px solid var(--bg-tertiary)',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  maxWidth: '180px',
+                  cursor: 'pointer'
+                }}
+                className="hover-bright"
+              >
+                {mics.map(m => (
+                  <option key={m.deviceId} value={m.deviceId}>
+                    {m.label || '默认麦克风'}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
 
           {!recording ? (
             <button onClick={startRecording} className="btn-primary" style={{
-              padding: '6px 16px', fontSize: '0.85rem', display: 'flex',
-              alignItems: 'center', gap: '6px',
+              padding: '0.6rem 1.25rem', fontSize: '0.875rem', display: 'flex',
+              alignItems: 'center', gap: '0.5rem',
             }}>
-              🔴 开始录制
+              <Circle size={16} fill="white" />
+              开始录制
             </button>
           ) : (
             <button onClick={stopRecording} style={{
-              padding: '6px 16px', fontSize: '0.85rem', borderRadius: '8px',
-              backgroundColor: '#ff3b30', color: 'white', border: 'none',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
-            }}>
-              ⏹ 停止录制
+              padding: '0.6rem 1.25rem', fontSize: '0.875rem', borderRadius: '10px',
+              backgroundColor: 'var(--error)', color: 'white', border: 'none',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem',
+              fontWeight: 600
+            }} className="hover-bright">
+              <Square size={16} fill="white" />
+              停止录制
             </button>
           )}
         </div>
@@ -340,62 +383,123 @@ const Recorder = ({ onRecorded, onSaved }) => {
 
       {/* Source toggles shown during recording */}
       {recording && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          flexWrap: 'wrap',
+          padding: '0.75rem',
+          backgroundColor: 'rgba(0,0,0,0.1)',
+          borderRadius: '12px',
+          marginTop: '0.5rem'
+        }}>
           <button onClick={toggleMic} style={{
-            padding: '4px 12px', fontSize: '0.8rem', borderRadius: '16px',
-            border: '1px solid var(--border)', cursor: 'pointer',
-            backgroundColor: micOn ? 'rgba(94,151,246,0.15)' : 'var(--bg-tertiary)',
-            color: micOn ? '#5e97f6' : 'var(--text-secondary)',
-            opacity: micOn ? 1 : 0.5, transition: 'all 0.2s',
+            padding: '6px 14px', fontSize: '0.8rem', borderRadius: '20px',
+            border: '1px solid',
+            cursor: 'pointer',
+            backgroundColor: micOn ? 'rgba(59,130,246,0.1)' : 'transparent',
+            borderColor: micOn ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+            color: micOn ? 'var(--accent-primary)' : 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            fontWeight: 500,
+            transition: 'var(--transition)'
           }}>
-            🎤 Mic {micOn ? 'ON' : 'OFF'}
+            <Mic size={14} />
+            Mic {micOn ? '已开启' : '已静音'}
           </button>
           <button onClick={toggleSys} style={{
-            padding: '4px 12px', fontSize: '0.8rem', borderRadius: '16px',
-            border: '1px solid var(--border)', cursor: 'pointer',
-            backgroundColor: sysOn ? 'rgba(94,151,246,0.15)' : 'var(--bg-tertiary)',
-            color: sysOn ? '#5e97f6' : 'var(--text-secondary)',
-            opacity: sysOn ? 1 : 0.5, transition: 'all 0.2s',
+            padding: '6px 14px', fontSize: '0.8rem', borderRadius: '20px',
+            border: '1px solid',
+            cursor: 'pointer',
+            backgroundColor: sysOn ? 'rgba(59,130,246,0.1)' : 'transparent',
+            borderColor: sysOn ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+            color: sysOn ? 'var(--accent-primary)' : 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            fontWeight: 500,
+            transition: 'var(--transition)'
           }}>
-            🔊 Sys {sysOn ? 'ON' : 'OFF'}
+            <Volume2 size={14} />
+            系统音 {sysOn ? '已开启' : '已静音'}
           </button>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-            点击切换音源 · 停止屏幕共享也会结束录制
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
+            停止屏幕共享也会结束录制
           </span>
         </div>
       )}
 
-      {!recording && !error && (
-        <p style={{ margin: '0.5rem 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-          同时录制系统声音和麦克风。点击后请选择屏幕并勾选"共享音频"。
-        </p>
-      )}
-
       {error && (
-        <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: '#ff3b30' }}>
-          ❌ {error}
-        </p>
+        <div style={{
+          marginTop: '1rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: 'rgba(239,68,68,0.1)',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: 'var(--error)',
+          fontSize: '0.85rem'
+        }}>
+          <AlertCircle size={16} />
+          {error}
+        </div>
       )}
 
       {sleepSaved && (
-        <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: '#FF9500', fontWeight: 600 }}>
-          ⚠️ 检测到系统休眠，录音已自动保存
-        </p>
+        <div style={{
+          marginTop: '1rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: 'rgba(245,158,11,0.1)',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: 'var(--warning)',
+          fontSize: '0.85rem',
+          fontWeight: 600
+        }}>
+          <AlertCircle size={16} />
+          检测到系统休眠，录音已自动保存
+        </div>
       )}
 
       {saving && (
-        <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: '#5e97f6', fontWeight: 600 }}>
-          💾 正在保存录音到历史记录...
-        </p>
+        <div style={{
+          marginTop: '1rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: 'rgba(59,130,246,0.1)',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: 'var(--accent-primary)',
+          fontSize: '0.85rem',
+          fontWeight: 600
+        }}>
+          <Loader2 size={16} className="animate-spin" />
+          正在保存录音到历史记录...
+        </div>
       )}
 
       {saveResult && (
-        <p style={{
-          margin: '0.5rem 0 0', fontSize: '0.8rem', fontWeight: 600,
-          color: saveResult.success ? '#34c759' : '#ff3b30',
+        <div style={{
+          marginTop: '1rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: saveResult.success ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: saveResult.success ? 'var(--success)' : 'var(--error)',
+          fontSize: '0.85rem',
+          fontWeight: 600
         }}>
-          {saveResult.success ? '✅ 录音已保存到历史记录' : '❌ 保存失败，请手动上传'}
-        </p>
+          {saveResult.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {saveResult.success ? '录音已保存到历史记录' : '保存失败，请手动上传'}
+        </div>
       )}
 
       <style>{`

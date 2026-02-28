@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { api } from '../../api/client';
+import { Download, FileText, Film, FileDown, Loader2 } from 'lucide-react';
 
 const FORMATS = [
-  { value: 'txt', label: '📄 TXT', desc: '纯文本' },
-  { value: 'srt', label: '🎬 SRT', desc: '字幕文件' },
-  { value: 'docx', label: '📘 Word', desc: 'Word 文档' },
-  { value: 'pdf', label: '📕 PDF', desc: 'PDF 文档' },
+  { value: 'txt', label: 'TXT', icon: <FileText size={16} />, desc: '纯文本' },
+  { value: 'srt', label: 'SRT', icon: <Film size={16} />, desc: '字幕文件' },
+  { value: 'docx', label: 'Word', icon: <FileDown size={16} />, desc: 'Word 文档' },
+  { value: 'pdf', label: 'PDF', icon: <FileDown size={16} />, desc: 'PDF 文档' },
 ];
 
 const ExportPanel = ({ taskId }) => {
@@ -34,20 +35,34 @@ const ExportPanel = ({ taskId }) => {
   };
 
   return (
-    <div style={{ marginTop: '1.5rem' }}>
-      <h4 style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>💾 导出</h4>
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+    <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--bg-tertiary)' }}>
+      <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
+        <Download size={16} />
+        导出文件
+      </h4>
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         {FORMATS.map(f => (
           <button key={f.value} onClick={() => handleExport(f.value)}
             disabled={exporting !== null}
             style={{
-              padding: '0.5rem 1rem', borderRadius: '8px',
-              border: '1px solid var(--border)',
-              backgroundColor: exporting === f.value ? 'var(--bg-tertiary)' : 'transparent',
-              color: 'var(--text-primary)', cursor: 'pointer',
-              fontSize: '0.85rem', opacity: exporting !== null ? 0.6 : 1,
-            }}>
-            {exporting === f.value ? '⏳' : f.label} {f.desc}
+              padding: '0.6rem 1.25rem',
+              borderRadius: '10px',
+              border: '1px solid var(--bg-tertiary)',
+              backgroundColor: 'var(--bg-tertiary)',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              opacity: exporting !== null && exporting !== f.value ? 0.5 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              transition: 'var(--transition)'
+            }}
+            className="hover-bright"
+          >
+            {exporting === f.value ? <Loader2 size={16} className="animate-spin" /> : f.icon}
+            <span>{f.label}</span>
+            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>{f.desc}</span>
           </button>
         ))}
       </div>
