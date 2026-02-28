@@ -18,7 +18,13 @@ class ExportService:
         # Setup font for PDF
         self.font_path = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
         if os.path.exists(self.font_path):
+            # Register Normal and Bold variants for the font family.
+            # Many CJK fonts in TTC don't have separate bold faces,
+            # so we register the same face for both. ReportLab's Paragraph <b> tag
+            # requires a registered font family to avoid falling back to Helvetica.
             pdfmetrics.registerFont(TTFont("ZenHei", self.font_path))
+            pdfmetrics.registerFont(TTFont("ZenHei-Bold", self.font_path))
+            pdfmetrics.registerFontFamily("ZenHei", normal="ZenHei", bold="ZenHei-Bold")
             self.pdf_font = "ZenHei"
         else:
             self.pdf_font = "Helvetica"
