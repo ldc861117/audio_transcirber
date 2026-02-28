@@ -43,12 +43,14 @@ from routes.task_routes import task_bp
 from routes.plan_routes import plan_bp
 from routes.export_routes import export_bp
 from routes.recording_routes import recording_bp
+from routes.speaker_routes import speaker_bp
 from services.task_service import TaskService
 
 app.register_blueprint(task_bp)
 app.register_blueprint(plan_bp)
 app.register_blueprint(export_bp)
 app.register_blueprint(recording_bp)
+app.register_blueprint(speaker_bp)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -471,9 +473,13 @@ def api_me():
 # ================================================================
 
 @app.route("/")
+@app.route("/transcribe")
+@app.route("/history")
+@app.route("/speakers")
+@app.route("/settings")
 @login_required
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -661,188 +667,6 @@ def serve_demo_file(filename):
     return send_from_directory(str(DEMO_AUDIO_DIR), safe_name)
 
 
-# ================================================================
-#  Speaker Management Routes
-# ================================================================
-
-@app.route("/api/speakers")
-@login_required
-def list_speakers():
-    """Get all speaker profiles for the current user."""
-    profiles = speaker_db.get_profiles_for_user(current_user.id)
-    result = []
-    for p in profiles:
-        clips = speaker_db.get_clips_for_profile(p["id"])
-        result.append({
-            "id": p["id"],
-            "name": p["name"],
-            "created_at": p["created_at"],
-            "updated_at": p["updated_at"],
-            "clips": clips,
-        })
-    return jsonify(result)
-
-
-@app.route("/api/speakers/<int:profile_id>/name", methods=["POST"])
-@login_required
-def update_speaker_name(profile_id):
-    """Update a speaker's display name."""
-    profile = speaker_db.get_profile(profile_id)
-    if not profile or profile["user_id"] != current_user.id:
-        return jsonify({"error": "\u8bf4\u8bdd\u4eba\u4e0d\u5b58\u5728"}), 404
-    data = request.json or {}
-    name = data.get("name", "").strip()
-    if not name:
-        return jsonify({"error": "\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a"}), 400
-    speaker_db.update_profile_name(profile_id, name)
-    return jsonify({"ok": True, "name": name})
-
-
-@app.route("/api/speakers/<int:profile_id>", methods=["DELETE"])
-@login_required
-def delete_speaker(profile_id):
-    """Delete a speaker profile."""
-    profile = speaker_db.get_profile(profile_id)
-    if not profile or profile["user_id"] != current_user.id:
-        return jsonify({"error": "\u8bf4\u8bdd\u4eba\u4e0d\u5b58\u5728"}), 404
-    speaker_db.delete_profile(profile_id)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/speakers/merge", methods=["POST"])
-@login_required
-def merge_speakers():
-    """Merge two speaker profiles."""
-    data = request.json or {}
-    keep_id = data.get("keep_id")
-    merge_id = data.get("merge_id")
-    if not keep_id or not merge_id:
-        return jsonify({"error": "\u8bf7\u6307\u5b9a\u8981\u5408\u5e76\u7684\u8bf4\u8bdd\u4eba"}), 400
-    p1 = speaker_db.get_profile(keep_id)
-    p2 = speaker_db.get_profile(merge_id)
-    if not p1 or not p2 or p1["user_id"] != current_user.id or p2["user_id"] != current_user.id:
-        return jsonify({"error": "\u8bf4\u8bdd\u4eba\u4e0d\u5b58\u5728"}), 404
-    speaker_db.merge_profiles(keep_id, merge_id)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/clips/<path:filename>")
-@login_required
-def serve_clip_direct(filename):
-    """Serve an audio clip directly from the clips directory."""
-    safe_name = Path(filename).name
-    clip_path = CLIPS_DIR / safe_name
-    if not clip_path.exists():
-        return jsonify({"error": "片段不存在"}), 404
-    return send_from_directory(str(CLIPS_DIR), safe_name)
-
-
-@app.route("/api/speakers/<int:profile_id>/clips/<path:filename>")
-@login_required
-def serve_speaker_clip(profile_id, filename):
-    """Serve a speaker's audio clip (via profile)."""
-    profile = speaker_db.get_profile(profile_id)
-    if not profile or profile["user_id"] != current_user.id:
-        return jsonify({"error": "说话人不存在"}), 404
-    safe_name = Path(filename).name
-    clip_path = CLIPS_DIR / safe_name
-    if not clip_path.exists():
-        return jsonify({"error": "片段不存在"}), 404
-    return send_from_directory(str(CLIPS_DIR), safe_name)
-
-
-@app.route("/api/speakers/apply-names", methods=["POST"])
-@login_required
-def apply_speaker_names():
-    """Replace speaker labels in transcript with actual names."""
-    data = request.json or {}
-    task_id = data.get("task_id", "")
-    name_map = data.get("name_map", {})  # {"说话人1": "杨滨", "说话人2": "吕冬辰"}
-
-    uid = current_user.id
-    user_tasks = tasks.get(uid, {})
-    task = user_tasks.get(task_id)
-    if not task:
-        return jsonify({"error": "任务不存在"}), 404
-
-    transcript = task.get("transcript", "")
-    for old_label, new_name in name_map.items():
-        if new_name and new_name != old_label:
-            old_tag = f"\u3010{old_label}\u3011"
-            new_tag = f"\u3010{new_name}\u3011"
-            transcript = transcript.replace(old_tag, new_tag)
-    task["transcript"] = transcript
-    return jsonify({"ok": True, "transcript": transcript})
-
-
-@app.route("/api/speakers/save", methods=["POST"])
-@login_required
-def save_speakers_from_task():
-    """Save detected speakers from a transcription task to the speaker library."""
-    data = request.json or {}
-    task_id = data.get("task_id", "")
-    speaker_data = data.get("speakers", [])
-
-    uid = current_user.id
-    user_tasks = tasks.get(uid, {})
-    task = user_tasks.get(task_id)
-    if not task:
-        return jsonify({"error": "任务不存在"}), 404
-
-    task_speakers = task.get("speakers", [])
-    saved = []
-
-    # Also apply names to transcript
-    transcript = task.get("transcript", "")
-
-    for sd in speaker_data:
-        label = sd.get("label", "")
-        name = sd.get("name", label)
-
-        # Replace label in transcript with the given name
-        if name and name != label:
-            old_tag = f"\u3010{label}\u3011"
-            new_tag = f"\u3010{name}\u3011"
-            transcript = transcript.replace(old_tag, new_tag)
-
-        # Find matching speaker in task results
-        task_speaker = None
-        for ts in task_speakers:
-            if ts["label"] == label:
-                task_speaker = ts
-                break
-        if not task_speaker or not task_speaker.get("has_embedding"):
-            continue
-
-        matched_id = sd.get("matched_profile_id") or task_speaker.get("matched_profile_id")
-        clips = task_speaker.get("clips", [])
-
-        if matched_id:
-            # Update existing profile: rename + add new clips
-            speaker_db.update_profile_name(matched_id, name)
-            existing_clips = speaker_db.get_clips_for_profile(matched_id)
-            existing_fns = {c["filename"] for c in existing_clips}
-            for c in clips:
-                if c["filename"] not in existing_fns:
-                    speaker_db.add_clip(matched_id, c["filename"], c["duration"])
-            saved.append({"profile_id": matched_id, "name": name, "action": "updated"})
-        else:
-            if clips:
-                try:
-                    from speaker import get_embedder
-                    embedder = get_embedder()
-                    clip_path = str(CLIPS_DIR / clips[0]["filename"])
-                    embedding = embedder.embed_from_file(clip_path)
-                    profile_id = speaker_db.create_profile(uid, embedding, name)
-                    for c in clips:
-                        speaker_db.add_clip(profile_id, c["filename"], c["duration"])
-                    saved.append({"profile_id": profile_id, "name": name, "action": "created"})
-                except Exception as e:
-                    print(f"Warning: Failed to save speaker {label}: {e}")
-                    continue
-
-    task["transcript"] = transcript
-    return jsonify({"ok": True, "saved": saved, "transcript": transcript})
 
 
 # ================================================================

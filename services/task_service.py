@@ -53,6 +53,71 @@ class TaskService:
         return task_id
 
     @staticmethod
+    def update_task_speakers(task_id: str, user_id: int, speaker_updates: list) -> bool:
+        """
+        Update speaker labels/names for a task and synchronize the transcript.
+        speaker_updates: list of {label: str, name: str, matched_profile_id: int|None}
+        """
+        task = TaskService.get_task(task_id, user_id)
+        if not task:
+            return False
+
+        speakers = task.get("speakers", [])
+        transcript = task.get("transcript", "")
+
+        # Build update maps
+        label_to_new_name = {}
+        for update in speaker_updates:
+            label = update.get("label")
+            new_name = update.get("name")
+            matched_id = update.get("matched_profile_id")
+
+            if label:
+                label_to_new_name[label] = {
+                    "name": new_name,
+                    "matched_profile_id": matched_id
+                }
+
+        # 1. Update speakers metadata
+        for spk in speakers:
+            update = label_to_new_name.get(spk["label"])
+            if update:
+                spk["matched_name"] = update["name"]
+                spk["matched_profile_id"] = update["matched_profile_id"]
+
+        # 2. Synchronize transcript labels
+        # Assuming the transcript format uses 【Speaker Label】 or [Speaker Label]
+        # Based on DiarizationService._generate_transcript, it uses [Name]
+        # But based on app.py's run_transcription, it uses 【Label】
+        # Let's handle both or check how it was generated.
+        # TranscriptView.jsx uses 【(.+?)】 regex.
+
+        for label, info in label_to_new_name.items():
+            new_name = info["name"]
+            if not new_name or new_name == label:
+                continue
+
+            # Find the old name/label that might be in the transcript
+            # We need to find what the current display name is for this speaker label
+            current_display_name = label
+            for spk in task.get("speakers", []):
+                if spk["label"] == label:
+                    current_display_name = spk.get("matched_name") or spk["label"]
+                    break
+
+            if current_display_name != new_name:
+                old_tag = f"【{current_display_name}】"
+                new_tag = f"【{new_name}】"
+                transcript = transcript.replace(old_tag, new_tag)
+
+                # Also handle [Name] format if present
+                old_tag_br = f"[{current_display_name}]"
+                new_tag_br = f"[{new_name}]"
+                transcript = transcript.replace(old_tag_br, new_tag_br)
+
+        return TaskService.update_task(task_id, speakers=speakers, transcript=transcript)
+
+    @staticmethod
     def update_task(task_id: str, **kwargs) -> bool:
         """Update an existing transcription task."""
         if not kwargs:

@@ -11,6 +11,7 @@ from speaker import (
     _extract_segment_audio, MIN_CLIP_DURATION, CLIPS_DIR
 )
 import speaker_v2
+from services.speaker_service import SpeakerService
 
 class DiarizationService:
     def diarize(self, audio_path: str, chunk_results: List[str],
@@ -100,7 +101,7 @@ class DiarizationService:
         # Step 4: 声纹库匹配
         for speaker_res in merged_speakers:
             if speaker_res.embedding is not None:
-                match = speaker_v2.match_with_library(user_id, speaker_res.embedding)
+                match = SpeakerService.match_speaker(user_id, speaker_res.embedding)
                 if match:
                     speaker_res.matched_profile_id = match["profile_id"]
                     speaker_res.matched_name = match["name"]

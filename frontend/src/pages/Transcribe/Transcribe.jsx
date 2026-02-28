@@ -253,9 +253,11 @@ const Transcribe = () => {
             <h3 style={{ margin: 0 }}>转写完成</h3>
           </div>
           <TranscriptView
+            taskId={taskId}
             transcript={taskData.transcript}
             speakers={taskData.speakers || []}
             enableDiarization={taskData.enable_diarization}
+            onUpdate={(updatedData) => setTaskData(prev => ({ ...prev, ...updatedData }))}
           />
           <ExportPanel taskId={taskId} />
         </div>

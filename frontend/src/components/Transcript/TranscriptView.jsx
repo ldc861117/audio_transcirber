@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Copy, Check, FileText, Mic, Users } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Copy, Check, FileText, Mic, Users, Edit3, Save, UserPlus, X } from 'lucide-react';
+import { api } from '../../api/client';
 
 const SPEAKER_COLORS = [
   '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
@@ -24,8 +25,17 @@ function getSpeakerColor(speaker, colorMap) {
   return colorMap[speaker];
 }
 
-const TranscriptView = ({ transcript, speakers = [], enableDiarization = false }) => {
+const TranscriptView = ({ taskId, transcript, speakers = [], enableDiarization = false, onUpdate }) => {
   const [copied, setCopied] = useState(false);
+  const [editingSpeaker, setEditingSpeaker] = useState(null); // { label, name, matched_profile_id }
+  const [libraryProfiles, setLibraryProfiles] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (enableDiarization) {
+      api.speakers.list().then(res => setLibraryProfiles(res.data)).catch(console.error);
+    }
+  }, [enableDiarization]);
 
   if (!transcript) {
     return (
@@ -111,25 +121,125 @@ const TranscriptView = ({ transcript, speakers = [], enableDiarization = false }
         <div style={{ marginTop: '2rem', padding: '1.25rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: '12px' }}>
           <h4 style={{ marginBottom: '1rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)' }}>
             <Users size={16} />
-            识别到的说话人
+            识别到的说话人 (点击编辑)
           </h4>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            {speakers.map((sp, idx) => (
-              <div key={idx} style={{
-                padding: '0.5rem 1rem', borderRadius: '8px',
-                backgroundColor: SPEAKER_COLORS[idx % SPEAKER_COLORS.length] + '22',
-                color: SPEAKER_COLORS[idx % SPEAKER_COLORS.length],
-                fontSize: '0.85rem', fontWeight: 500,
-                border: `1px solid ${SPEAKER_COLORS[idx % SPEAKER_COLORS.length]}33`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <Mic size={14} />
-                {sp.matched_name || sp.label}
-                {sp.total_duration && <span style={{ opacity: 0.6, fontSize: '0.75rem' }}>{Math.round(sp.total_duration)}s</span>}
-              </div>
-            ))}
+            {speakers.map((sp, idx) => {
+              const displayName = sp.matched_name || sp.label;
+              const isEditing = editingSpeaker?.label === sp.label;
+
+              return (
+                <div key={idx} style={{ position: 'relative' }}>
+                  <div
+                    onClick={() => !isEditing && setEditingSpeaker({
+                      label: sp.label,
+                      name: displayName,
+                      matched_profile_id: sp.matched_profile_id
+                    })}
+                    style={{
+                      padding: '0.5rem 1rem', borderRadius: '8px',
+                      backgroundColor: SPEAKER_COLORS[idx % SPEAKER_COLORS.length] + '22',
+                      color: SPEAKER_COLORS[idx % SPEAKER_COLORS.length],
+                      fontSize: '0.85rem', fontWeight: 500,
+                      border: `1px solid ${SPEAKER_COLORS[idx % SPEAKER_COLORS.length]}33`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      cursor: 'pointer'
+                    }}
+                    className="hover-bright"
+                  >
+                    <Mic size={14} />
+                    {displayName}
+                    {sp.total_duration && <span style={{ opacity: 0.6, fontSize: '0.75rem' }}>{Math.round(sp.total_duration)}s</span>}
+                    <Edit3 size={12} style={{ marginLeft: '4px', opacity: 0.5 }} />
+                  </div>
+
+                  {isEditing && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, marginTop: '8px',
+                      backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                      borderRadius: '12px', padding: '1rem', zIndex: 100, boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+                      width: '280px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>编辑说话人</span>
+                        <X size={16} cursor="pointer" onClick={() => setEditingSpeaker(null)} />
+                      </div>
+
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>名称</label>
+                        <input
+                          type="text"
+                          value={editingSpeaker.name}
+                          onChange={e => setEditingSpeaker({ ...editingSpeaker, name: e.target.value })}
+                          style={{ width: '100%', padding: '6px 10px', fontSize: '0.9rem' }}
+                          autoFocus
+                        />
+                      </div>
+
+                      <div style={{ marginBottom: '1rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>匹配库中已有声纹</label>
+                        <select
+                          value={editingSpeaker.matched_profile_id || ''}
+                          onChange={e => setEditingSpeaker({ ...editingSpeaker, matched_profile_id: e.target.value ? parseInt(e.target.value) : null })}
+                          style={{ width: '100%', padding: '6px', fontSize: '0.85rem' }}
+                        >
+                          <option value="">-- 不关联 --</option>
+                          {libraryProfiles.map(p => (
+                            <option key={p.id} value={p.id}>{p.name || `说话人 ${p.id}`}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          className="btn-primary"
+                          disabled={isSaving}
+                          onClick={async () => {
+                            setIsSaving(true);
+                            try {
+                              const res = await api.speakers.updateTaskSpeakers(taskId, [editingSpeaker]);
+                              if (onUpdate) onUpdate(res.data);
+                              setEditingSpeaker(null);
+                            } catch (err) {
+                              alert('更新失败: ' + (err.response?.data?.error || err.message));
+                            } finally {
+                              setIsSaving(false);
+                            }
+                          }}
+                          style={{ flex: 1, padding: '6px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                        >
+                          <Save size={14} /> 保存修改
+                        </button>
+                        <button
+                          title="保存声纹到库"
+                          disabled={isSaving}
+                          onClick={async () => {
+                            setIsSaving(true);
+                            try {
+                              const res = await api.speakers.updateTaskSpeakers(taskId, [editingSpeaker], true);
+                              if (onUpdate) onUpdate(res.data);
+                              // Refresh library
+                              const libRes = await api.speakers.list();
+                              setLibraryProfiles(libRes.data);
+                              setEditingSpeaker(null);
+                            } catch (err) {
+                              alert('入库失败: ' + (err.response?.data?.error || err.message));
+                            } finally {
+                              setIsSaving(false);
+                            }
+                          }}
+                          style={{ padding: '6px 10px', fontSize: '0.85rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px', border: '1px solid var(--border)' }}
+                        >
+                          <UserPlus size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
