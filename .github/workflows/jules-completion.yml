@@ -1,0 +1,102 @@
+name: Jules Completion Callback
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  notify_completion:
+    # Only run for Jules-managed issues
+    if: contains(github.event.issue.labels.*.name, 'agent-dispatched') || contains(github.event.issue.labels.*.name, 'jules-plan') || contains(github.event.issue.labels.*.name, 'jules-review')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract metadata and callback
+        uses: actions/github-script@v6
+        env:
+          CLOUD_RUN_URL: ${{ secrets.CLOUD_RUN_URL }}
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title;
+            const body = issue.body || '';
+
+            // Extract session ID from title: [AUD-42] or [AUD-42-1]
+            const sessionMatch = title.match(/\[([A-Z]+-\d+)(?:-(\d+))?\]/);
+            if (!sessionMatch) {
+              console.log('No session ID found in title, skipping');
+              return;
+            }
+
+            const sessionId = sessionMatch[1];
+            const taskId = sessionMatch[2] ? parseInt(sessionMatch[2]) : null;
+
+            // Determine phase from labels
+            const labels = issue.labels.map(l => l.name);
+            let phase = 'execute';
+            if (labels.includes('jules-plan')) phase = 'plan';
+            if (labels.includes('jules-review')) phase = 'review';
+
+            // Extract Linear issue ID from body (🔑 Issue ID: AUD-42)
+            const linearIdMatch = body.match(/🔑 Issue ID: ([A-Z]+-\d+(?:-\d+)?)/);
+            const linearId = linearIdMatch ? linearIdMatch[1] : sessionId;
+
+            // For plan phase, extract TASK_GRAPH from issue body or comments
+            let taskGraph = '';
+            if (phase === 'plan') {
+              // Check issue body first
+              const graphMatch = body.match(/<!--\s*TASK_GRAPH[\s\S]*?TASK_GRAPH\s*-->/);
+              if (graphMatch) {
+                taskGraph = graphMatch[0];
+              } else {
+                // Check comments
+                const comments = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                });
+                for (const comment of comments.data) {
+                  const match = comment.body.match(/<!--\s*TASK_GRAPH[\s\S]*?TASK_GRAPH\s*-->/);
+                  if (match) {
+                    taskGraph = match[0];
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Find associated PR
+            let prUrl = '';
+            const timeline = await github.rest.issues.listEventsForTimeline({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+            });
+            for (const event of timeline.data) {
+              if (event.event === 'cross-referenced' && event.source?.issue?.pull_request) {
+                prUrl = event.source.issue.pull_request.html_url;
+              }
+            }
+
+            // Send callback to Cloud Run
+            const callbackUrl = `${process.env.CLOUD_RUN_URL}/callback`;
+            const payload = {
+              session_id: sessionId,
+              task_id: taskId,
+              phase: phase,
+              status: 'completed',
+              linear_issue_id: linearId,
+              parent_issue_id: sessionId,  // Will need to be resolved by Cloud Run
+              team_id: '',  // Will be resolved by Cloud Run from the issue
+              task_graph: taskGraph,
+              pr_url: prUrl,
+            };
+
+            console.log('Sending callback:', JSON.stringify(payload, null, 2));
+
+            const response = await fetch(callbackUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+
+            console.log(`Callback response: ${response.status}`);
