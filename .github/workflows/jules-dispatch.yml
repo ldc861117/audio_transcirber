@@ -1,123 +1,27 @@
-# =============================================================================
-# Jules AI Dispatcher — Receives repository_dispatch from GCP Cloud Run
-# =============================================================================
-# Architecture: Linear Webhook → GCP Cloud Run → repository_dispatch → This Action
-#
-# Expected client_payload from Cloud Run:
-#   {
-#     "title":       "Issue title from Linear",
-#     "description": "Issue body / task details",
-#     "linear_url":  "https://linear.app/team/issue/XXX",
-#     "action":      "execute" | "plan" | "review",  (optional, default: execute)
-#     "labels":      ["J-Execute"]                    (optional, from Linear)
-#   }
-# =============================================================================
-
-name: Jules AI Dispatcher
+name: Jules Plan Dispatcher
 
 on:
   repository_dispatch:
-    types: [jules_trigger]
+    types: [jules_plan]
 
 permissions:
-  issues: write # 允许创建和评论 Issue
-  contents: read # 允许读取代码仓库内容
+  issues: write
+  contents: read
 
 jobs:
-  wake_jules:
+  create_plan_issue:
     runs-on: ubuntu-latest
     steps:
-      - name: Determine Jules prompt
-        id: prompt
-        uses: actions/github-script@v7
+      - name: Create Plan Issue for Jules
+        uses: actions/github-script@v6
         with:
           script: |
             const payload = context.payload.client_payload;
-            const action  = (payload.action || 'execute').toLowerCase();
-            const title   = payload.title || 'Untitled Task';
-            const desc    = payload.description || '';
-            const url     = payload.linear_url || '';
-
-            let directive = '';
-
-            switch (action) {
-              case 'plan':
-                directive = [
-                  `@jules Please create an implementation plan for the following task. **Do NOT write code yet.**`,
-                  ``,
-                  `## Task: ${title}`,
-                  url ? `> Linear: ${url}` : '',
-                  ``,
-                  `### Instructions`,
-                  `1. Review the codebase architecture (\`AGENTS.md\`, \`docs/\`).`,
-                  `2. Propose a step-by-step plan with files to create/modify.`,
-                  `3. Highlight potential risks or conflicts.`,
-                  `4. **Wait for human approval before coding.**`,
-                  ``,
-                  `### Details`,
-                  desc,
-                ].filter(Boolean).join('\n');
-                break;
-
-              case 'review':
-                directive = [
-                  `@jules Please review the code changes associated with this issue.`,
-                  ``,
-                  `## Task: ${title}`,
-                  url ? `> Linear: ${url}` : '',
-                  ``,
-                  `### Instructions`,
-                  `1. Check correctness, edge cases, and adherence to project conventions.`,
-                  `2. Verify test coverage.`,
-                  `3. Suggest improvements.`,
-                  ``,
-                  `### Details`,
-                  desc,
-                ].filter(Boolean).join('\n');
-                break;
-
-              default: // execute
-                directive = [
-                  `@jules Please implement the following task.`,
-                  ``,
-                  `## Task: ${title}`,
-                  url ? `> Linear: ${url}` : '',
-                  ``,
-                  `### Instructions`,
-                  `1. Read \`AGENTS.md\` for project conventions.`,
-                  `2. Create a feature branch \`jules/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}\`.`,
-                  `3. Implement with proper tests.`,
-                  `4. Submit a Pull Request when done.`,
-                  ``,
-                  `### Details`,
-                  desc,
-                ].filter(Boolean).join('\n');
-                break;
-            }
-
-            core.setOutput('body', directive);
-            core.setOutput('title', title);
-            core.setOutput('action', action);
-
-      - name: Create Issue for Jules
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const payload = context.payload.client_payload;
-            const action  = (payload.action || 'execute').toLowerCase();
-
-            const labelMap = {
-              execute: 'J-Execute',
-              plan:    'J-Plan',
-              review:  'J-Review',
-            };
-
-            await github.rest.issues.create({
+            const issue = await github.rest.issues.create({
               owner: context.repo.owner,
-              repo:  context.repo.repo,
-              title: `${{ steps.prompt.outputs.title }}`,
-              body:  `${{ steps.prompt.outputs.body }}`,
-              labels: ['agent-dispatched', labelMap[action] || 'J-Execute'],
+              repo: context.repo.repo,
+              title: `[${payload.session_id}] Plan: ${payload.title}`,
+              body: payload.description,
+              labels: ['jules-plan']
             });
-
-            console.log(`✅ Issue created for Jules (action: ${action})`);
+            console.log(`Created plan issue #${issue.data.number}`);
