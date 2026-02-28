@@ -10,6 +10,7 @@
 # ── Task & Transcription ────────────────────────────────────
 
 task_status_enum:
+  - recorded
   - queued
   - splitting
   - transcribing

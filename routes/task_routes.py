@@ -18,7 +18,7 @@ def list_tasks():
     try:
         page = int(request.args.get("page", 1))
         per_page = int(request.args.get("per_page", 20))
-        search = request.args.get("q", "")
+        search = request.args.get("search", "") or request.args.get("q", "")
         
         result = TaskService.list_tasks(
             user_id=current_user.id,

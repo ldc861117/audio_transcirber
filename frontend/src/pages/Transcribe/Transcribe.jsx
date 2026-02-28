@@ -1,278 +1,191 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useConfigStore, PROVIDER_DEFAULTS } from '../../stores/configStore';
+import TranscriptView from '../../components/Transcript/TranscriptView';
+import ExportPanel from '../../components/Transcript/ExportPanel';
+import Recorder from '../../components/Recorder/Recorder';
 import { api } from '../../api/client';
-import DropZone from '../../components/AudioUpload/DropZone';
-import ProgressBar from '../../components/Progress/ProgressBar';
-import ChunkGrid from '../../components/Progress/ChunkGrid';
-import { useTranscribeStore } from '../../stores/transcribeStore';
-
-const STORAGE_KEY = 'audio_transcriber_config';
-
-const loadSavedConfig = () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : null;
-  } catch { return null; }
-};
-
-const saveConfig = (provider, config) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ provider, ...config }));
-};
 
 const Transcribe = () => {
-  const saved = loadSavedConfig();
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [provider, setProvider] = useState(saved?.provider || 'gemini');
-  const [config, setConfig] = useState({
-    baseUrl: saved?.baseUrl || '',
-    model: saved?.model || 'gemini-3-flash-preview',
-    apiKey: saved?.apiKey || '',
-    maxMinutes: saved?.maxMinutes || 10,
-    maxMB: saved?.maxMB || 20,
-    enableDiarization: saved?.enableDiarization || false
-  });
-  const [isUploading, setIsUploading] = useState(false);
+  const { provider, model, baseUrl, apiKey, enableDiarization, setField } = useConfigStore();
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [taskId, setTaskId] = useState(null);
+  const [taskData, setTaskData] = useState(null);
   const [error, setError] = useState('');
-  const [serverKeyStatus, setServerKeyStatus] = useState({});
+  const fileInputRef = useRef(null);
+  const pollRef = useRef(null);
 
-  const { currentTaskId, uploadFile, updateTaskStatus, tasks, clearCurrentTask } = useTranscribeStore();
-  const currentTask = tasks[currentTaskId];
-  const pollIntervalRef = useRef(null);
-
-  // Load built-in providers + server key status
-  const [availableProviders, setAvailableProviders] = useState({});
-  useEffect(() => {
-    api.providers.list().then(res => {
-      setAvailableProviders(res.data);
-      // Check which providers have server-side API keys
-      const keyStatus = {};
-      Object.entries(res.data).forEach(([name, info]) => {
-        keyStatus[name] = info.has_key || false;
-      });
-      setServerKeyStatus(keyStatus);
-
-      // If no saved config, auto-set from server defaults
-      if (!saved && res.data.gemini) {
-        setConfig(prev => ({
-          ...prev,
-          model: res.data.gemini.model || 'gemini-3-flash-preview',
-          baseUrl: res.data.gemini.base_url || '',
-        }));
+  // Poll task status
+  const pollStatus = useCallback((id) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.transcriptions.status(id);
+        setTaskData(res.data);
+        if (res.data.status === 'done' || res.data.status === 'error') {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      } catch (err) {
+        console.error('Poll failed', err);
       }
-    }).catch(() => {});
-
-    // Check test mode
-    api.providers.testConfig().then(res => {
-      if (res.data.test_mode && res.data.has_config) {
-        setProvider('custom');
-        setConfig(prev => ({
-          ...prev,
-          baseUrl: res.data.base_url,
-          model: res.data.model,
-          apiKey: res.data.api_key_set ? '(server-env)' : ''
-        }));
-      }
-    }).catch(() => {});
+    }, 1500);
   }, []);
 
-  // Save config whenever it changes
   useEffect(() => {
-    saveConfig(provider, config);
-  }, [provider, config]);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
-  const handleProviderChange = (e) => {
-    const p = e.target.value;
-    setProvider(p);
-    if (availableProviders[p]) {
-      setConfig(prev => ({
-        ...prev,
-        model: availableProviders[p].model,
-        baseUrl: availableProviders[p].base_url || ''
-      }));
-    } else if (p === 'custom') {
-      setConfig(prev => ({ ...prev, model: '', baseUrl: '' }));
-    }
+  const handleFileSelect = (e) => {
+    const selected = e.target.files?.[0];
+    if (selected) { setFile(selected); setError(''); }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) { setFile(dropped); setError(''); }
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!file) return;
+    setUploading(true);
     setError('');
-    setIsUploading(true);
+    setTaskData(null);
 
     const formData = new FormData();
-    formData.append('audio', selectedFile);
+    formData.append('audio', file);
     formData.append('provider', provider);
-    formData.append('base_url', config.baseUrl);
-    formData.append('api_key', config.apiKey);
-    formData.append('model', config.model);
-    formData.append('max_minutes', config.maxMinutes);
-    formData.append('max_mb', config.maxMB);
-    formData.append('enable_diarization', config.enableDiarization);
+    formData.append('model', model);
+    if (baseUrl) formData.append('base_url', baseUrl);
+    if (apiKey) formData.append('api_key', apiKey);
+    formData.append('enable_diarization', enableDiarization ? 'true' : 'false');
 
     try {
-      await uploadFile(formData);
+      const res = await api.transcriptions.upload(formData);
+      const id = res.data.task_id;
+      setTaskId(id);
+      setTaskData({ status: 'queued', filename: file.name });
+      pollStatus(id);
     } catch (err) {
       setError(err.response?.data?.error || '上传失败');
-      setIsUploading(false);
+    } finally {
+      setUploading(false);
     }
   };
 
-  useEffect(() => {
-    if (currentTaskId && currentTask?.status !== 'done' && currentTask?.status !== 'error') {
-      pollIntervalRef.current = setInterval(() => {
-        updateTaskStatus(currentTaskId);
-      }, 2000);
-    } else {
-      clearInterval(pollIntervalRef.current);
-      if (currentTask?.status === 'done' || currentTask?.status === 'error') {
-        setIsUploading(false);
-      }
-    }
-    return () => clearInterval(pollIntervalRef.current);
-  }, [currentTaskId, currentTask?.status]);
-
-  const calculateProgress = () => {
-    if (!currentTask) return 0;
-    if (currentTask.status === 'done') return 100;
-    if (currentTask.status === 'splitting') return 10;
-    if (currentTask.status === 'transcribing') {
-      const total = currentTask.total_chunks || 1;
-      const done = currentTask.completed_chunks || 0;
-      return 10 + (done / total) * 80;
-    }
-    if (currentTask.status === 'diarizing') return 95;
-    return 0;
-  };
-
-  const hasServerKey = serverKeyStatus[provider];
+  const isDone = taskData?.status === 'done';
+  const isActive = taskData && !isDone && taskData.status !== 'error';
+  const progress = taskData ? Math.round((taskData.completed_chunks || 0) / Math.max(taskData.total_chunks || 1, 1) * 100) : 0;
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '2rem' }}>新建转写任务</h1>
+    <div>
+      <h1 style={{ fontSize: '2rem', marginBottom: '2rem' }}>新建转写任务</h1>
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ marginBottom: '1rem' }}>1. API 配置</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label>Provider</label>
-            <select value={provider} onChange={handleProviderChange}>
-              <option value="gemini">🔮 Gemini (推荐)</option>
-              <option value="zhipu">🧠 智谱 AI</option>
-              <option value="modelscope">🪐 ModelScope</option>
-              <option value="custom">⚙️ 自定义 (OpenAI 兼容)</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label>模型</label>
-            <input
-              type="text"
-              value={config.model}
-              onChange={(e) => setConfig({...config, model: e.target.value})}
-              placeholder="例如: gemini-3-flash-preview"
-            />
-          </div>
-          {(provider === 'custom' || provider === 'modelscope') && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', gridColumn: 'span 2' }}>
-              <label>Base URL</label>
-              <input
-                type="text"
-                value={config.baseUrl}
-                onChange={(e) => setConfig({...config, baseUrl: e.target.value})}
-                placeholder="https://api.example.com/v1"
-              />
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', gridColumn: 'span 2' }}>
-            <label>
-              API Key
-              {hasServerKey && (
-                <span style={{ color: 'var(--success, #4caf50)', fontSize: '0.8rem', marginLeft: '0.5rem' }}>
-                  ✅ 服务端已配置
-                </span>
-              )}
-            </label>
-            <input
-              type="password"
-              value={config.apiKey}
-              onChange={(e) => setConfig({...config, apiKey: e.target.value})}
-              placeholder={hasServerKey ? '服务端已配置，此处可留空' : '请输入 API Key'}
-            />
-          </div>
-        </div>
+      {/* Recording */}
+      <Recorder onRecorded={(f) => { setFile(f); setError(''); }} />
 
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={config.enableDiarization}
-              onChange={(e) => setConfig({...config, enableDiarization: e.target.checked})}
-            />
-            开启说话人识别
-          </label>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ marginBottom: '1rem' }}>2. 上传音频</h3>
-        <DropZone
-          onFileSelect={setSelectedFile}
-          selectedFile={selectedFile}
-          onCancel={() => setSelectedFile(null)}
-        />
-
-        {error && <div style={{ color: 'var(--error)', marginTop: '1rem' }}>{error}</div>}
-
-        <button
-          className="btn-primary"
-          onClick={handleUpload}
-          disabled={!selectedFile || isUploading}
-          style={{ width: '100%', marginTop: '1.5rem', height: '48px' }}
+      {/* Upload area */}
+      <div className="card" style={{ padding: '2rem', marginBottom: '1.5rem' }}>
+        <h3 style={{ marginBottom: '1rem' }}>上传音频文件</h3>
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDrop={handleDrop}
+          onDragOver={e => e.preventDefault()}
+          style={{
+            border: '2px dashed var(--border)', borderRadius: '12px',
+            padding: '3rem', textAlign: 'center', cursor: 'pointer',
+            backgroundColor: file ? 'rgba(94,151,246,0.05)' : 'transparent',
+            transition: 'all 0.2s',
+          }}
         >
-          {isUploading ? '处理中...' : '开始转写'}
-        </button>
+          {file ? (
+            <div>
+              <span style={{ fontSize: '2rem' }}>🎵</span>
+              <p style={{ fontWeight: 600, marginTop: '0.5rem' }}>{file.name}</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                {(file.size / 1024 / 1024).toFixed(1)} MB · 点击更换
+              </p>
+            </div>
+          ) : (
+            <div>
+              <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '0.5rem' }}>📁</span>
+              <p style={{ fontWeight: 600 }}>点击或拖拽音频文件到此处</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>支持 MP3, WAV, M4A, FLAC 等</p>
+            </div>
+          )}
+          <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+        </div>
       </div>
 
-      {currentTask && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3>3. 转写进度</h3>
-            {currentTask.status === 'done' && (
-              <button onClick={clearCurrentTask} style={{ backgroundColor: 'transparent', color: 'var(--accent-primary)' }}>
-                清除任务
-              </button>
-            )}
+      {/* Options strip */}
+      <div className="card" style={{ padding: '1.25rem 2rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            Provider: <strong style={{ color: 'var(--text-primary)' }}>{provider}</strong>
+          </span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            模型: <strong style={{ color: 'var(--text-primary)' }}>{model}</strong>
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+            <input type="checkbox" checked={enableDiarization}
+              onChange={e => setField('enableDiarization', e.target.checked)} />
+            🎤 说话人识别
+          </label>
+          <button className="btn-primary" onClick={handleUpload}
+            disabled={!file || uploading || isActive}
+            style={{ padding: '0.6rem 2rem' }}>
+            {uploading ? '⏳ 上传中...' : isActive ? '⏳ 处理中...' : '🚀 开始转写'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: '8px', backgroundColor: 'rgba(255,59,48,0.1)', color: '#ff3b30' }}>
+          ❌ {error}
+        </div>
+      )}
+
+      {/* Progress */}
+      {isActive && (
+        <div className="card" style={{ padding: '2rem', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+            <span style={{ fontWeight: 600 }}>
+              {taskData.status === 'splitting' ? '✂️ 分割音频...' :
+               taskData.status === 'transcribing' ? `📝 转写中 ${taskData.current_chunk || 0}/${taskData.total_chunks || '?'}` :
+               taskData.status === 'diarizing' ? '🎤 识别说话人...' : '⏳ 处理中...'}
+            </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{progress}%</span>
           </div>
+          <div style={{ height: '6px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${progress}%`, backgroundColor: '#5e97f6', borderRadius: '3px', transition: 'width 0.3s' }} />
+          </div>
+        </div>
+      )}
 
-          <ProgressBar progress={calculateProgress()} status={currentTask.status} />
-          <ChunkGrid chunks={currentTask.chunk_results} />
+      {/* Error result */}
+      {taskData?.status === 'error' && (
+        <div className="card" style={{ padding: '2rem', marginBottom: '1.5rem' }}>
+          <div style={{ color: '#ff3b30' }}>
+            <h3>❌ 转写失败</h3>
+            <pre style={{ marginTop: '1rem', fontSize: '0.8rem', whiteSpace: 'pre-wrap', opacity: 0.7 }}>
+              {taskData.error}
+            </pre>
+          </div>
+        </div>
+      )}
 
-          {currentTask.status === 'error' && (
-            <div style={{ color: 'var(--error)', marginTop: '1rem', padding: '1rem', backgroundColor: 'rgba(244,67,54,0.1)', borderRadius: '8px' }}>
-              ❌ {currentTask.error || '转写失败，请检查 API 配置'}
-            </div>
-          )}
-
-          {currentTask.status === 'done' && (
-            <div style={{ marginTop: '2rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h4>转写结果</h4>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="btn-primary" style={{ padding: '4px 12px', fontSize: '0.8rem' }} onClick={() => navigator.clipboard.writeText(currentTask.transcript)}>复制</button>
-                </div>
-              </div>
-              <div style={{
-                backgroundColor: 'var(--bg-tertiary)',
-                padding: '1rem',
-                borderRadius: '8px',
-                whiteSpace: 'pre-wrap',
-                maxHeight: '400px',
-                overflowY: 'auto',
-                fontSize: '0.9rem',
-                lineHeight: '1.6'
-              }}>
-                {currentTask.transcript}
-              </div>
-            </div>
-          )}
+      {/* Transcript result */}
+      {isDone && (
+        <div className="card" style={{ padding: '2rem' }}>
+          <TranscriptView
+            transcript={taskData.transcript}
+            speakers={taskData.speakers || []}
+            enableDiarization={taskData.enable_diarization}
+          />
+          <ExportPanel taskId={taskId} />
         </div>
       )}
     </div>

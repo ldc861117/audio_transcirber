@@ -42,10 +42,13 @@ setup_auth(app)
 from routes.task_routes import task_bp
 from routes.plan_routes import plan_bp
 from routes.export_routes import export_bp
+from routes.recording_routes import recording_bp
+from services.task_service import TaskService
 
 app.register_blueprint(task_bp)
 app.register_blueprint(plan_bp)
 app.register_blueprint(export_bp)
+app.register_blueprint(recording_bp)
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -361,9 +364,25 @@ def run_transcription(task_id: str, filepath: str,
 
         task["status"] = "done"
 
+        # ── Persist final result to SQLite ──
+        try:
+            TaskService.update_task(task_id,
+                status="done",
+                transcript=task.get("transcript", ""),
+                speakers=task.get("speakers", []),
+                chunk_count=task.get("total_chunks", 0),
+                error="",
+            )
+        except Exception as db_err:
+            print(f"⚠️ DB persist failed: {db_err}")
+
     except Exception:
         task["status"] = "error"
         task["error"] = traceback.format_exc()
+        try:
+            TaskService.update_task(task_id, status="error", error=task["error"])
+        except Exception:
+            pass
     finally:
         try:
             os.unlink(original_filepath)
@@ -519,6 +538,20 @@ def upload():
         "enable_diarization": enable_diarization,
     }
 
+    # ── Persist task to SQLite ──
+    try:
+        TaskService.create_task(
+            task_id=task_id,
+            user_id=uid,
+            filename=file.filename,
+            file_size_mb=round(file_size_mb, 2),
+            enable_diarization=enable_diarization,
+            provider=provider,
+            model=model,
+        )
+    except Exception as db_err:
+        print(f"⚠️ DB create failed: {db_err}")
+
     t = threading.Thread(
         target=run_transcription,
         args=(task_id, save_path, base_url, api_key, model,
@@ -533,11 +566,16 @@ def upload():
 @app.route("/api/status/<task_id>")
 @login_required
 def status(task_id):
+    # Live in-memory data first (for active tasks with progress)
     user_tasks = tasks.get(current_user.id, {})
     task = user_tasks.get(task_id)
-    if not task:
-        return jsonify({"error": "\u4efb\u52a1\u4e0d\u5b58\u5728"}), 404
-    return jsonify(task)
+    if task:
+        return jsonify(task)
+    # Fall back to DB for completed/historical tasks
+    db_task = TaskService.get_task(task_id, current_user.id)
+    if db_task:
+        return jsonify(db_task)
+    return jsonify({"error": "\u4efb\u52a1\u4e0d\u5b58\u5728"}), 404
 
 
 @app.route("/api/test-connection", methods=["POST"])

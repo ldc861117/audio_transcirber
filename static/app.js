@@ -76,6 +76,8 @@
   let timerStart = 0;
   let pollTimer = null;
   let providerConfigs = {}; // { provider: { baseUrl, apiKey, model } }
+  let lastRecordTick = 0;   // for system sleep detection
+  let isRecording = false;  // stable flag for event listeners
 
   const SPEAKER_COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#5856D6"];
 
@@ -416,7 +418,8 @@
         sourceToggles.style.display = "none";
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(5000); // flush data every 5 seconds for crash safety
+      isRecording = true;
       
       // UI Update
       startRecordBtn.disabled = true;
@@ -430,13 +433,19 @@
       toggleSysBtn.classList.add("active");
       
       recordTimeStart = Date.now();
+      lastRecordTick = Date.now();
       recordTimer.textContent = "00:00";
       recordInterval = setInterval(() => {
+        lastRecordTick = Date.now();
         const diff = Date.now() - recordTimeStart;
         const s = Math.floor(diff / 1000) % 60;
         const m = Math.floor(diff / 60000);
         recordTimer.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       }, 1000);
+
+      // Register sleep detection listeners
+      document.addEventListener('visibilitychange', handleSleepWake);
+      window.addEventListener('beforeunload', handleBeforeUnload);
 
     } catch (err) {
       showToast("❌ 录制失败: " + err.message, "error");
@@ -462,12 +471,81 @@
       mediaRecorder.stop();
     }
     clearInterval(recordInterval);
+    isRecording = false;
     startRecordBtn.disabled = false;
     startRecordBtn.classList.remove("recording");
     startRecordBtn.textContent = "🔴 开始录制";
     stopRecordBtn.disabled = true;
     micSelect.disabled = false;
+    // Remove sleep detection listeners
+    document.removeEventListener('visibilitychange', handleSleepWake);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
   });
+
+  // ── System Sleep/Hibernation Detection ────────────────────
+  function handleSleepWake() {
+    if (document.visibilityState === 'visible' && isRecording) {
+      const now = Date.now();
+      const gap = now - lastRecordTick;
+      if (gap > 30000) {
+        console.warn(`[Recorder] System sleep detected (gap: ${Math.round(gap / 1000)}s). Auto-stopping recording.`);
+        emergencyStopRecording();
+      }
+    }
+  }
+
+  function handleBeforeUnload(e) {
+    if (isRecording) {
+      emergencyStopRecording();
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  }
+
+  function emergencyStopRecording() {
+    if (!isRecording) return;
+    isRecording = false;
+
+    // Try to gracefully stop MediaRecorder
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      try {
+        mediaRecorder.stop();
+      } catch {
+        // If stop() fails, do emergency save with existing chunks
+        if (recordedChunks.length > 0) {
+          const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+          const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
+          // Clean up streams
+          micStream?.getTracks().forEach(t => t.stop());
+          systemStream?.getTracks().forEach(t => t.stop());
+          if (audioCtx) { audioCtx.close(); audioCtx = null; }
+          selectFile(file);
+        }
+      }
+    } else if (recordedChunks.length > 0) {
+      // MediaRecorder already inactive, save whatever we have
+      const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+      const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
+      micStream?.getTracks().forEach(t => t.stop());
+      systemStream?.getTracks().forEach(t => t.stop());
+      if (audioCtx) { audioCtx.close(); audioCtx = null; }
+      selectFile(file);
+    }
+
+    clearInterval(recordInterval);
+    startRecordBtn.disabled = false;
+    startRecordBtn.classList.remove("recording");
+    startRecordBtn.textContent = "🔴 开始录制";
+    stopRecordBtn.disabled = true;
+    micSelect.disabled = false;
+    sourceToggles.style.display = "none";
+
+    showToast("⚠️ 检测到系统休眠，录音已自动保存", "success");
+
+    // Clean up listeners
+    document.removeEventListener('visibilitychange', handleSleepWake);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+  }
 
   async function selectFile(file) {
     selectedFile = file;

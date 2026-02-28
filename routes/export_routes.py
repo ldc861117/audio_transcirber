@@ -2,22 +2,31 @@ import io
 from flask import Blueprint, request, send_file, jsonify
 from flask_login import login_required, current_user
 from services.export_service import ExportService
+from services.task_service import TaskService
 
 export_bp = Blueprint("export", __name__, url_prefix="/api/v1/export")
 export_service = ExportService()
 
-@export_bp.route("/<task_id>", methods=["POST"])
+@export_bp.route("/<task_id>", methods=["GET", "POST"])
 @login_required
 def export_task(task_id):
-    data = request.json or {}
-    fmt = data.get("format", "txt").lower()
-    transcript = data.get("transcript", "")
-    speakers = data.get("speakers", [])
-    metadata = data.get("metadata", {})
-    
-    # In case metadata is missing filename, try to get it from request or default
-    if not metadata.get("filename"):
-        metadata["filename"] = data.get("filename", f"export_{task_id}")
+    # GET: pull data from DB; POST: use provided data
+    if request.method == "GET":
+        task_data = TaskService.get_task(task_id, current_user.id)
+        if not task_data:
+            return jsonify({"error": "任务不存在"}), 404
+        fmt = request.args.get("format", "txt").lower()
+        transcript = task_data.get("transcript", "")
+        speakers = task_data.get("speakers", [])
+        metadata = {"filename": task_data.get("filename", f"export_{task_id}")}
+    else:
+        data = request.json or {}
+        fmt = data.get("format", "txt").lower()
+        transcript = data.get("transcript", "")
+        speakers = data.get("speakers", [])
+        metadata = data.get("metadata", {})
+        if not metadata.get("filename"):
+            metadata["filename"] = data.get("filename", f"export_{task_id}")
 
     filename = metadata["filename"]
 
@@ -62,6 +71,6 @@ def export_task(task_id):
             )
         else:
             return jsonify({"error": f"Unsupported format: {fmt}"}), 400
-            
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
