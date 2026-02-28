@@ -5,8 +5,8 @@ on:
     types: [closed]
 
 permissions:
-  issues: write # 允许创建和评论 Issue
-  contents: read # 允许读取代码仓库内容
+  issues: write
+  contents: read
 
 jobs:
   notify_completion:
