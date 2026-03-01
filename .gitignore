@@ -23,3 +23,11 @@ data/
 node_modules/
 frontend/dist/
 frontend/node_modules/
+
+# Runtime logs
+app.log
+*.log
+
+# Frontend build artifacts in static/
+static/assets/
+static/vite.svg
