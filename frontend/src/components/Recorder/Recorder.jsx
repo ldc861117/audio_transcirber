@@ -175,19 +175,27 @@ const Recorder = ({ onRecorded, onSaved }) => {
       micStreamRef.current = micStream;
 
       // 2. Get system audio via screen share
+      // Enable loopback audio handler in Electron main process first
+      if (window.electronAPI?.enableLoopbackAudio) {
+        await window.electronAPI.enableLoopbackAudio();
+      }
       let sysStream;
       try {
         sysStream = await navigator.mediaDevices.getDisplayMedia({
-          video: { width: 1 },
+          video: true,
           audio: true,
         });
-      } catch {
+        // We only need audio - stop any video tracks
+        sysStream.getVideoTracks().forEach(t => t.stop());
+      } catch (displayErr) {
+        console.error('[Recorder] getDisplayMedia failed:', displayErr?.name, displayErr?.message);
         micStream.getTracks().forEach(t => t.stop());
-        throw new Error('取消了屏幕共享或未勾选"共享音频"');
+        throw new Error(`屏幕共享失败: ${displayErr?.message || '未知错误'}`);
       }
       sysStreamRef.current = sysStream;
 
       if (sysStream.getAudioTracks().length === 0) {
+        console.warn('[Recorder] No audio tracks in system stream, tracks:', sysStream.getTracks().map(t => `${t.kind}:${t.label}`));
         micStream.getTracks().forEach(t => t.stop());
         sysStream.getTracks().forEach(t => t.stop());
         throw new Error('未检测到系统音轨，请确保勾选了"共享音频"');

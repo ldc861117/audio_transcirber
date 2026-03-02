@@ -6,13 +6,13 @@ Provides SQLite-backed user storage and Flask-Login integration.
 import os
 import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 
 from flask_login import LoginManager, UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
+from app_paths import get_data_dir
 
 # ── Database setup ─────────────────────────────────────────────
-DB_DIR = Path(__file__).resolve().parent / "data"
+DB_DIR = get_data_dir()
 DB_DIR.mkdir(exist_ok=True)
 DB_PATH = DB_DIR / "users.db"
 

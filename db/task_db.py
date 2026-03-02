@@ -8,7 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 # Database file path: data/tasks.db
-DB_DIR = Path(__file__).resolve().parent.parent / "data"
+from app_paths import get_data_dir
+
+DB_DIR = get_data_dir()
 DB_PATH = DB_DIR / "tasks.db"
 
 

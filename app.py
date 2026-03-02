@@ -31,10 +31,17 @@ from speaker import (
     merge_cross_chunk_speakers, speaker_result_to_dict,
     CLIPS_DIR,
 )
+from app_paths import get_bundle_dir
 
 load_dotenv()
 
-app = Flask(__name__, static_folder="static", static_url_path="")
+_bundle_dir = get_bundle_dir()
+app = Flask(
+    __name__,
+    static_folder=str(_bundle_dir / "static"),
+    template_folder=str(_bundle_dir / "templates"),
+    static_url_path="",
+)
 CORS(app, origins=["http://localhost:5099", "http://localhost:3000"])
 setup_auth(app)
 
@@ -93,7 +100,7 @@ def _get_builtin_key(provider_name: str) -> str:
     env_var = info.get("api_key_env", "")
     return os.environ.get(env_var, "") if env_var else ""
 
-DEMO_AUDIO_DIR = Path(__file__).resolve().parent / "demo_audio"
+DEMO_AUDIO_DIR = _bundle_dir / "demo_audio"
 DEMO_AUDIO_DIR.mkdir(exist_ok=True)
 
 

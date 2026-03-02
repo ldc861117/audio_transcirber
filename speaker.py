@@ -13,6 +13,7 @@ from typing import Optional
 
 import numpy as np
 from pydub import AudioSegment
+from app_paths import get_data_dir
 
 # Lazy imports for optional heavy deps
 _ort = None
@@ -37,10 +38,10 @@ def _ensure_scipy():
 
 # ── Constants ──────────────────────────────────────────────────
 
-MODEL_DIR = Path(__file__).resolve().parent / "data" / "models"
+MODEL_DIR = get_data_dir() / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-CLIPS_DIR = Path(__file__).resolve().parent / "data" / "speaker_clips"
+CLIPS_DIR = get_data_dir() / "speaker_clips"
 CLIPS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ECAPA-TDNN ONNX model from wespeaker (small, ~20MB)

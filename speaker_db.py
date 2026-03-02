@@ -7,11 +7,11 @@ import json
 import sqlite3
 import numpy as np
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Optional
+from app_paths import get_data_dir
 
 # ── Database setup ─────────────────────────────────────────────
-DB_DIR = Path(__file__).resolve().parent / "data"
+DB_DIR = get_data_dir()
 DB_DIR.mkdir(exist_ok=True)
 DB_PATH = DB_DIR / "speakers.db"
 

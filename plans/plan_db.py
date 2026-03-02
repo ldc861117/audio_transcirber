@@ -1,8 +1,8 @@
 import sqlite3
-from pathlib import Path
 from contextlib import contextmanager
+from app_paths import get_data_dir
 
-DB_DIR = Path(__file__).resolve().parent.parent / "data"
+DB_DIR = get_data_dir()
 DB_DIR.mkdir(exist_ok=True)
 DB_PATH = DB_DIR / "plans.db"
 

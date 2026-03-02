@@ -363,15 +363,32 @@
       };
       micStream = await navigator.mediaDevices.getUserMedia(micConstraints);
       
-      // 2. Get System Audio stream
+      // 2. Get System Audio stream via getDisplayMedia
+      // Enable loopback audio handler in Electron main process first
+      if (window.electronAPI && window.electronAPI.enableLoopbackAudio) {
+        await window.electronAPI.enableLoopbackAudio();
+      }
       try {
         systemStream = await navigator.mediaDevices.getDisplayMedia({ 
-          video: { width: 1 }, 
+          video: true, 
           audio: true 
         });
+        // We only need audio - stop any video tracks immediately
+        systemStream.getVideoTracks().forEach(t => t.stop());
       } catch (err) {
         micStream.getTracks().forEach(t => t.stop());
-        throw new Error("取消了屏幕共享或未勾选“共享音频”。");
+        console.error('[Recording] getDisplayMedia failed:', err);
+        // Check permission status if available
+        let hint = '';
+        if (window.electronAPI && window.electronAPI.getScreenPermissionStatus) {
+          const status = await window.electronAPI.getScreenPermissionStatus();
+          if (status === 'denied' || status === 'restricted') {
+            hint = '\n请前往"系统设置 → 隐私与安全性 → 屏幕录制"，将 Electron.app 添加到列表中并开启权限，然后重启应用。';
+          } else if (status === 'not-determined') {
+            hint = '\n请在弹出的权限对话框中点击"允许"，然后重启应用重试。';
+          }
+        }
+        throw new Error(`无法获取系统音频。${hint || '\n请确认已授予屏幕录制权限并重启应用。'}`);
       }
 
       audioCtx = new AudioContext();

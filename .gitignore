@@ -1,33 +1,48 @@
-docs_local/
-AGENTS.md
-start.sh
+# ── Python ──────────────────────────────────────────
 .venv/
 __pycache__/
 *.py[cod]
 *$py.class
 .mypy_cache/
 .pytest_cache/
+
+# ── Environment / Secrets ───────────────────────────
 .env
 
-# Local Audio Files - Ignore all audio in demo_audio EXCEPT the sample
-demo_audio/*
-!demo_audio/sample_test.m4a
-!demo_audio/.gitkeep
+# ── Build artifacts (PyInstaller) ───────────────────
+build/
+dist/
+flask_dist/
+*.spec.bak
 
-# Ignore upload directory if created locally
-uploads/
-audio_transcriber_uploads/
+# ── Electron build artifacts ────────────────────────
+electron/dist/
+electron/node_modules/
 
-# SQLite user database
-data/
+# ── Frontend build artifacts ────────────────────────
 node_modules/
 frontend/dist/
 frontend/node_modules/
-
-# Runtime logs
-app.log
-*.log
-
-# Frontend build artifacts in static/
 static/assets/
 static/vite.svg
+
+# ── Audio / Media files ────────────────────────────
+demo_audio/*
+!demo_audio/sample_test.m4a
+!demo_audio/.gitkeep
+uploads/
+audio_transcriber_uploads/
+
+# ── Data / Database ────────────────────────────────
+data/
+
+# ── Logs ───────────────────────────────────────────
+*.log
+
+# ── macOS system files ─────────────────────────────
+.DS_Store
+
+# ── Local docs ─────────────────────────────────────
+docs_local/
+AGENTS.md
+start.sh

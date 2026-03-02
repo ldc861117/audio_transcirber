@@ -1,7 +1,7 @@
 import yaml
-from pathlib import Path
+from app_paths import get_bundle_dir
 
-CONTRACTS_PATH = Path(__file__).resolve().parent.parent / "contracts.yaml"
+CONTRACTS_PATH = get_bundle_dir() / "contracts.yaml"
 
 def _load_plan_definitions():
     with open(CONTRACTS_PATH, "r", encoding="utf-8") as f:
