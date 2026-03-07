@@ -3,7 +3,7 @@ import { useConfigStore, PROVIDER_DEFAULTS } from '../../stores/configStore';
 import TranscriptView from '../../components/Transcript/TranscriptView';
 import ExportPanel from '../../components/Transcript/ExportPanel';
 import Recorder from '../../components/Recorder/Recorder';
-import { api } from '../../api/client';
+import { api } from '../../api/endpoints';
 import {
   Upload,
   FileAudio,

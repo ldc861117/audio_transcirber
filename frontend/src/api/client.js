@@ -1,63 +1,55 @@
-import axios from 'axios';
+import axios from "axios";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 const client = axios.create({
-  baseURL: '/api',
+  baseURL: `${API_BASE_URL}/api/v2`,
 });
 
+// Request interceptor: 附加 JWT
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem("access_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor: 自动刷新 Token
 client.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response && error.response.status === 401) {
-      if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/register')) {
-        window.location.href = '/login';
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        const refreshToken = localStorage.getItem("refresh_token");
+        if (!refreshToken) throw new Error("No refresh token");
+
+        // 使用原生 axios 避免拦截器循环
+        const res = await axios.post(`${API_BASE_URL}/api/v2/auth/refresh`, {
+          refresh_token: refreshToken,
+        });
+
+        const newAccessToken = res.data.data.access_token;
+        localStorage.setItem("access_token", newAccessToken);
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return client(originalRequest);
+      } catch (refreshError) {
+        // Refresh 失败 → 清除 tokens → 跳转登录
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        if (!window.location.pathname.startsWith("/login")) {
+          window.location.href = "/login";
+        }
+        return Promise.reject(refreshError);
       }
     }
-    return Promise.reject(error);
-  }
-);
 
-export const api = {
-  auth: {
-    login: (data) => client.post('/auth/login', data),
-    register: (data) => client.post('/auth/register', data),
-    logout: () => client.post('/auth/logout'),
-    me: () => client.get('/auth/me'),
+    return Promise.reject(error);
   },
-  transcriptions: {
-    upload: (formData) => client.post('/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
-    status: (taskId) => client.get(`/status/${taskId}`),
-    list: (params = {}) => client.get('/v1/transcriptions/', { params }),
-    get: (taskId) => client.get(`/v1/transcriptions/${taskId}`),
-    delete: (taskId) => client.delete(`/v1/transcriptions/${taskId}`),
-  },
-  providers: {
-    list: () => client.get('/builtin-providers'),
-    test: (data) => client.post('/test-connection', data),
-    testConnection: (data) => client.post('/test-connection', data),
-    testConfig: () => client.get('/test-config'),
-  },
-  speakers: {
-    list: () => client.get('/speakers'),
-    rename: (id, name) => client.post(`/speakers/${id}/name`, { name }),
-    delete: (id) => client.delete(`/speakers/${id}`),
-    merge: (keepId, mergeId) => client.post('/speakers/merge', { keep_id: keepId, merge_id: mergeId }),
-    updateTaskSpeakers: (taskId, speakers, saveToLibrary = false) =>
-      client.post(`/v1/transcriptions/${taskId}/speakers`, { speakers, save_to_library: saveToLibrary }),
-  },
-  exports: {
-    download: (taskId, format) => client.get(`/v1/export/${taskId}`, {
-      params: { format },
-      responseType: 'blob',
-    }),
-  },
-  recordings: {
-    save: (formData) => client.post('/v1/recordings/save', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
-    transcribe: (taskId, config = {}) => client.post(`/v1/recordings/${taskId}/transcribe`, config),
-  },
-};
+);
 
 export default client;

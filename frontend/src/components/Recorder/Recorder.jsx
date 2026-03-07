@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { api } from '../../api/client';
+import { api } from '../../api/endpoints';
 import {
   Mic,
   Circle,

@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { useNavigate } from 'react-router-dom';
 import { Menu, LogOut, User } from 'lucide-react';
+import QuotaBar from '../QuotaBar/QuotaBar';
 
 const Header = ({ toggleSidebar, isMobile }) => {
   const { user, logout } = useAuthStore();
@@ -41,20 +42,37 @@ const Header = ({ toggleSidebar, isMobile }) => {
             <Menu size={20} />
           </button>
         )}
-        <div style={{
-          fontSize: isMobile ? '1.1rem' : '1.5rem',
-          fontWeight: 'bold',
-          background: 'var(--accent-gradient)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          whiteSpace: 'nowrap'
-        }}>
+        <div 
+          onClick={() => navigate('/')}
+          style={{
+            fontSize: isMobile ? '1.1rem' : '1.5rem',
+            fontWeight: 'bold',
+            background: 'var(--accent-gradient)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            whiteSpace: 'nowrap',
+            cursor: 'pointer'
+          }}
+        >
           AudioTranscriber
         </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+        {!isMobile && user && <QuotaBar />}
+        
+        <div 
+          onClick={() => navigate('/account')}
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem', 
+            color: 'var(--text-secondary)', 
+            fontSize: '0.9rem',
+            cursor: 'pointer'
+          }}
+          className="hover-bright"
+        >
           <User size={16} />
           {!isMobile && <span>{user?.username}</span>}
         </div>

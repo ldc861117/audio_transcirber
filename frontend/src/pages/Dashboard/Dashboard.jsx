@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
-import { api } from '../../api/client';
+import { api } from '../../api/endpoints';
 import {
   Rocket,
   Clock,
