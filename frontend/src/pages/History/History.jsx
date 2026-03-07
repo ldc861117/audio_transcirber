@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client';
 import { useConfigStore } from '../../stores/configStore';
 import TranscriptView from '../../components/Transcript/TranscriptView';
 import ExportPanel from '../../components/Transcript/ExportPanel';
+
+const ACTIVE_STATUSES = ['queued', 'splitting', 'transcribing', 'diarizing'];
 
 const STATUS_MAP = {
   recorded: { label: '🎙️ 未转写', color: '#FF9500', bg: 'rgba(255,149,0,0.1)' },
@@ -13,6 +15,13 @@ const STATUS_MAP = {
   diarizing: { label: '🎤 识别中', color: '#5e97f6', bg: 'rgba(94,151,246,0.1)' },
   done: { label: '✅ 完成', color: '#34c759', bg: 'rgba(52,199,89,0.1)' },
   error: { label: '❌ 失败', color: '#ff3b30', bg: 'rgba(255,59,48,0.1)' },
+};
+
+const STATUS_TEXT = {
+  queued: '排队中...',
+  splitting: '分割音频...',
+  transcribing: '转写中',
+  diarizing: '识别说话人...',
 };
 
 const History = () => {
@@ -25,6 +34,8 @@ const History = () => {
   const [expandedId, setExpandedId] = useState(searchParams.get('task') || null);
   const [expandedData, setExpandedData] = useState(null);
   const [transcribing, setTranscribing] = useState({}); // { taskId: true }
+  const [activeProgress, setActiveProgress] = useState({}); // { taskId: { status, total_chunks, completed_chunks, current_chunk, ... } }
+  const progressPollRef = useRef(null);
 
   const { provider, model, baseUrl, apiKey, enableDiarization } = useConfigStore();
 
@@ -43,14 +54,49 @@ const History = () => {
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
-  // Auto-refresh for tasks that are in-progress
+  // Poll progress for all active tasks
   useEffect(() => {
-    const hasActive = tasks.some(t =>
-      ['queued', 'splitting', 'transcribing', 'diarizing'].includes(t.status)
-    );
-    if (!hasActive) return;
-    const interval = setInterval(fetchTasks, 3000);
-    return () => clearInterval(interval);
+    const activeTasks = tasks.filter(t => ACTIVE_STATUSES.includes(t.status));
+    if (activeTasks.length === 0) {
+      if (progressPollRef.current) {
+        clearInterval(progressPollRef.current);
+        progressPollRef.current = null;
+      }
+      return;
+    }
+
+    const pollActiveProgress = async () => {
+      const updates = {};
+      let anyFinished = false;
+      for (const task of activeTasks) {
+        try {
+          const res = await api.transcriptions.status(task.id);
+          updates[task.id] = res.data;
+          if (res.data.status === 'done' || res.data.status === 'error') {
+            anyFinished = true;
+          }
+        } catch (err) {
+          // ignore poll errors
+        }
+      }
+      setActiveProgress(prev => ({ ...prev, ...updates }));
+      if (anyFinished) {
+        fetchTasks(); // Refresh task list when any task finishes
+      }
+    };
+
+    // Poll immediately on mount
+    pollActiveProgress();
+
+    if (progressPollRef.current) clearInterval(progressPollRef.current);
+    progressPollRef.current = setInterval(pollActiveProgress, 1500);
+
+    return () => {
+      if (progressPollRef.current) {
+        clearInterval(progressPollRef.current);
+        progressPollRef.current = null;
+      }
+    };
   }, [tasks, fetchTasks]);
 
   // Auto-expand task detail if navigated with ?task=xxx
@@ -110,6 +156,15 @@ const History = () => {
     }
   };
 
+  const getTaskProgress = (taskId) => {
+    const prog = activeProgress[taskId];
+    if (!prog) return null;
+    const total = Math.max(prog.total_chunks || 1, 1);
+    const completed = prog.completed_chunks || 0;
+    const pct = Math.round((completed / total) * 100);
+    return { ...prog, pct, total, completed };
+  };
+
   const formatDate = (iso) => {
     if (!iso) return '';
     return new Date(iso).toLocaleString('zh-CN', {
@@ -166,7 +221,13 @@ const History = () => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {tasks.map(task => (
+          {tasks.map(task => {
+            const isActive = ACTIVE_STATUSES.includes(task.status);
+            const prog = getTaskProgress(task.id);
+            const liveStatus = prog?.status || task.status;
+            const liveStatusInfo = STATUS_MAP[liveStatus] || STATUS_MAP[task.status];
+
+            return (
             <div key={task.id}>
               <div onClick={() => handleExpand(task.id)}
                 className="card" style={{
@@ -184,10 +245,36 @@ const History = () => {
                     {task.duration_seconds > 0 && ` · ${formatDuration(task.duration_seconds)}`}
                     {task.provider && ` · ${task.provider}`}
                   </span>
+
+                  {/* Inline progress bar for active tasks */}
+                  {isActive && prog && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#5e97f6', fontWeight: 600 }}>
+                          {STATUS_TEXT[liveStatus] || '处理中...'}
+                          {liveStatus === 'transcribing' && prog.total > 0 && ` ${prog.completed}/${prog.total}`}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#5e97f6', fontWeight: 700 }}>
+                          {prog.pct}%
+                        </span>
+                      </div>
+                      <div style={{
+                        height: '4px', backgroundColor: 'var(--bg-tertiary)',
+                        borderRadius: '2px', overflow: 'hidden',
+                      }}>
+                        <div style={{
+                          height: '100%', width: `${prog.pct}%`,
+                          background: 'linear-gradient(90deg, #5e97f6, #34c759)',
+                          borderRadius: '2px',
+                          transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                        }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {renderStatusBadge(task.status)}
+                  {renderStatusBadge(liveStatus)}
 
                   {/* Transcribe button for saved recordings */}
                   {(task.status === 'recorded' || task.status === 'error') && (
@@ -218,14 +305,56 @@ const History = () => {
                 </span>
               </div>
 
-              {expandedId === task.id && expandedData && (
+              {expandedId === task.id && (
                 <div className="card" style={{ padding: '1.5rem', marginTop: '0.25rem', borderLeft: '3px solid #5e97f6' }}>
                   {task.status === 'recorded' ? (
                     <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
                       <span style={{ fontSize: '2rem', display: 'block', marginBottom: '0.5rem' }}>🎙️</span>
                       <p>此录音尚未转写，点击上方「开始转写」按钮进行转写</p>
                     </div>
-                  ) : (
+                  ) : isActive ? (
+                    /* Active task: show detailed progress */
+                    <div style={{ padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span style={{ fontSize: '1.5rem' }}>
+                            {liveStatus === 'splitting' ? '✂️' :
+                             liveStatus === 'transcribing' ? '📝' :
+                             liveStatus === 'diarizing' ? '🎤' : '⏳'}
+                          </span>
+                          <div>
+                            <span style={{ fontWeight: 600, fontSize: '1rem' }}>
+                              {STATUS_TEXT[liveStatus] || '处理中...'}
+                            </span>
+                            {liveStatus === 'transcribing' && prog && (
+                              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+                                {prog.completed}/{prog.total} 分段
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span style={{ color: '#5e97f6', fontWeight: 700, fontSize: '1.25rem' }}>
+                          {prog?.pct || 0}%
+                        </span>
+                      </div>
+                      <div style={{
+                        height: '8px', backgroundColor: 'var(--bg-tertiary)',
+                        borderRadius: '4px', overflow: 'hidden',
+                      }}>
+                        <div style={{
+                          height: '100%', width: `${prog?.pct || 0}%`,
+                          background: 'linear-gradient(90deg, #5e97f6, #34c759)',
+                          borderRadius: '4px',
+                          transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                        }} />
+                      </div>
+                      {prog?.current_chunk > 0 && (
+                        <p style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          正在处理第 {prog.current_chunk} 段 (共 {prog.total} 段)
+                        </p>
+                      )}
+                    </div>
+                  ) : expandedData ? (
                     <>
                       <TranscriptView
                         transcript={expandedData.transcript}
@@ -234,11 +363,14 @@ const History = () => {
                       />
                       <ExportPanel taskId={task.id} />
                     </>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>加载中...</div>
                   )}
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
           {/* Pagination */}
           {totalPages > 1 && (

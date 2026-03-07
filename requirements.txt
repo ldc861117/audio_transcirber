@@ -11,3 +11,5 @@ scipy>=1.10
 pyyaml>=6.0
 python-docx>=0.8.11
 reportlab>=4.0
+audioop-lts
+pywebview>=5.0

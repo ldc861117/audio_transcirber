@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for Flask-only binary (Electron handles the GUI)
+# PyInstaller spec for Audio Transcriber standalone macOS app
+
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
+
+# Collect all pywebview files (submodules, data, binaries)
+webview_datas, webview_binaries, webview_hiddenimports = collect_all('webview')
 
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
+    binaries=webview_binaries,
     datas=[
         ('static', 'static'),
         ('configs', 'configs'),
@@ -18,7 +23,7 @@ a = Analysis(
         ('services', 'services'),
         ('templates', 'templates'),
         ('.env.example', '.'),
-    ],
+    ] + webview_datas,
     hiddenimports=[
         # Flask & Extensions
         'flask', 'flask_cors', 'flask_login',
@@ -41,12 +46,16 @@ a = Analysis(
         # Third party
         'zhipuai', 'openai', 'pydub', 'dotenv', 'yaml',
         'numpy', 'scipy', 'onnxruntime',
+        'audioop', 'pyaudioop',  # Python 3.13+ compat via audioop-lts
         'docx', 'reportlab',
-    ],
+        # Native window (pywebview + pyobjc)
+        'objc', 'Foundation', 'AppKit', 'WebKit',
+        'PyObjCTools', 'PyObjCTools.Conversion',
+    ] + webview_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['webview'],
+    excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -64,9 +73,9 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,        # headless Flask server, stdout/stderr go to Electron
+    console=False,       # No terminal window for the app
     disable_windowed_traceback=False,
-    argv_emulation=False, # not a GUI app
+    argv_emulation=True,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
@@ -81,4 +90,15 @@ coll = COLLECT(
     upx_exclude=[],
     name='Audio Transcriber',
 )
-# No BUNDLE — Electron handles the .app wrapper
+app = BUNDLE(
+    coll,
+    name='Audio Transcriber.app',
+    icon=None,
+    bundle_identifier='com.audiotranscriber.app',
+    info_plist={
+        'CFBundleShortVersionString': '1.0.0',
+        'CFBundleName': 'Audio Transcriber',
+        'NSHighResolutionCapable': True,
+        'LSMinimumSystemVersion': '12.0',
+    },
+)

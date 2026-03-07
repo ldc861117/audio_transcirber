@@ -43,7 +43,7 @@ const DropZone = ({ onFileSelect, selectedFile, onCancel }) => {
         ref={fileInputRef}
         onChange={(e) => e.target.files[0] && onFileSelect(e.target.files[0])}
         style={{ display: 'none' }}
-        accept="audio/*"
+        accept="audio/*,video/*,.m4a,.mp3,.wav,.ogg,.flac,.aac,.wma,.opus,.webm,.mp4,.mov,.mkv,.caf"
       />
       
       {!selectedFile ? (

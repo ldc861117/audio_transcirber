@@ -16,9 +16,34 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, redirect
 from flask_cors import CORS
 from flask_login import login_user, logout_user, login_required, current_user
+import shutil
 import sqlite3 as _sqlite3
 from pydub import AudioSegment
 from openai import OpenAI
+
+# ── Ensure pydub can find ffmpeg/ffprobe even inside a PyInstaller .app ──
+# macOS .app bundles don't inherit shell PATH, so Homebrew binaries are invisible.
+def _setup_ffmpeg():
+    """Locate ffmpeg and ffprobe, set pydub paths explicitly."""
+    search_dirs = [
+        "/opt/homebrew/bin",       # Apple Silicon Homebrew
+        "/usr/local/bin",          # Intel Homebrew / manual install
+        "/usr/bin",                # system
+    ]
+    for name, attr in [("ffmpeg", "converter"), ("ffprobe", "ffprobe")]:
+        # Already findable?
+        if shutil.which(name):
+            continue
+        for d in search_dirs:
+            candidate = os.path.join(d, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                if attr == "converter":
+                    AudioSegment.converter = candidate
+                else:
+                    AudioSegment.ffprobe = candidate
+                break
+
+_setup_ffmpeg()
 try:
     from zhipuai import ZhipuAI
 except ImportError:
@@ -31,11 +56,18 @@ from speaker import (
     merge_cross_chunk_speakers, speaker_result_to_dict,
     CLIPS_DIR,
 )
-from app_paths import get_bundle_dir
+from app_paths import get_bundle_dir, get_data_dir
 
-load_dotenv()
-
+# ── Load .env from the writable data directory (not the app bundle) ──
+# On first launch, copy .env.example as a starting template.
 _bundle_dir = get_bundle_dir()
+_data_dir = get_data_dir()
+_env_file = _data_dir / ".env"
+if not _env_file.exists():
+    _template = _bundle_dir / ".env.example"
+    if _template.exists():
+        shutil.copy2(_template, _env_file)
+load_dotenv(_env_file)
 app = Flask(
     __name__,
     static_folder=str(_bundle_dir / "static"),
@@ -75,8 +107,8 @@ SUPPORTED_EXTENSIONS = {
 tasks: dict[int, dict[str, dict]] = {}
 
 # ── defaults (overridable per-request) ──────────────────────────
-DEFAULT_MAX_CHUNK_MINUTES = 10       # minutes per chunk
-DEFAULT_MAX_CHUNK_MB      = 20       # MB per chunk (safe for base64 inline)
+DEFAULT_MAX_CHUNK_MINUTES = 60       # minutes per chunk
+DEFAULT_MAX_CHUNK_MB      = 100      # MB per chunk
 
 # Load optional defaults from environment (for Quick Start / Test Mode)
 DEFAULT_BASE_URL = os.environ.get("custom_openai_baseurl", "")
@@ -290,7 +322,6 @@ def run_transcription(task_id: str, filepath: str,
                 })
             except Exception as e:
                 err_msg = str(e)
-                results.append(f"[\u7247\u6bb5 {i+1} \u8f6c\u5199\u5931\u8d25: {err_msg}]")
                 task["chunk_results"].append({
                     "index": i + 1,
                     "status": "error",
@@ -371,16 +402,25 @@ def run_transcription(task_id: str, filepath: str,
                     except OSError:
                         pass
 
-        task["status"] = "done"
+        # -- 5. Determine final status --------------------------------
+        error_chunks = [c for c in task["chunk_results"] if c["status"] == "error"]
+        all_failed = len(error_chunks) == len(task["chunk_results"]) and len(task["chunk_results"]) > 0
+
+        if all_failed:
+            task["status"] = "error"
+            task["transcript"] = ""
+            task["error"] = f"全部 {len(error_chunks)} 个分段转写失败: {error_chunks[0]['text']}"
+        else:
+            task["status"] = "done"
 
         # ── Persist final result to SQLite ──
         try:
             TaskService.update_task(task_id,
-                status="done",
+                status=task["status"],
                 transcript=task.get("transcript", ""),
                 speakers=task.get("speakers", []),
                 chunk_count=task.get("total_chunks", 0),
-                error="",
+                error=task.get("error", ""),
             )
         except Exception as db_err:
             print(f"⚠️ DB persist failed: {db_err}")
@@ -679,5 +719,39 @@ def serve_demo_file(filename):
 # ================================================================
 
 if __name__ == "__main__":
-    print("Audio Transcriber running on http://localhost:5099")
-    app.run(host="0.0.0.0", port=5099, debug=False)
+    import threading
+    import webview
+
+    port = 5099
+    url = f"http://localhost:{port}"
+
+    def _start_flask():
+        """Run Flask in a background thread."""
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.WARNING)
+        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+
+    print(f"Audio Transcriber running on {url}")
+    flask_thread = threading.Thread(target=_start_flask, daemon=True)
+    flask_thread.start()
+
+    # Wait for Flask to be ready
+    import time, urllib.request
+    for _ in range(20):
+        try:
+            urllib.request.urlopen(url, timeout=1)
+            break
+        except Exception:
+            time.sleep(0.3)
+
+    # Create native window
+    webview.create_window(
+        "Audio Transcriber",
+        url,
+        width=1200,
+        height=800,
+        min_size=(800, 600),
+    )
+    webview.start()
+

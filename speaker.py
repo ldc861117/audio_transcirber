@@ -272,44 +272,81 @@ def parse_diarization_response(response_text: str) -> list[SpeakerSegment]:
 
 def _try_parse_json(text: str) -> list[SpeakerSegment]:
     """Try to extract and parse JSON segments from the response."""
-    # Look for JSON array in the text
-    patterns = [
-        r'```json\s*([\s\S]*?)\s*```',   # Markdown code block
-        r'(\[[\s\S]*?\])',                  # Raw JSON array
-        r'(\{[\s\S]*?"segments"[\s\S]*?\})', # Object with segments key
-    ]
+    # Strategy 1: Markdown code block (most reliable when present)
+    md_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if md_match:
+        result = _parse_json_data(md_match.group(1).strip())
+        if result:
+            return result
 
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1))
-
-            # Handle both raw array and {segments: [...]} wrapper
-            if isinstance(data, dict) and "segments" in data:
-                data = data["segments"]
-
-            if not isinstance(data, list):
-                continue
-
-            segments = []
-            for item in data:
-                seg = SpeakerSegment(
-                    speaker_label=str(item.get("speaker", item.get("speaker_label", "Unknown"))),
-                    start_time=float(item.get("start", item.get("start_time", 0))),
-                    end_time=float(item.get("end", item.get("end_time", 0))),
-                    text=str(item.get("text", "")),
-                )
-                if seg.duration > 0:
-                    segments.append(seg)
-
-            if segments:
-                return segments
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            continue
+    # Strategy 2: Find JSON by bracket-counting (handles large nested structures)
+    # Try to find a complete JSON object { ... } or array [ ... ]
+    for opener, closer in [('{', '}'), ('[', ']')]:
+        start_idx = text.find(opener)
+        while start_idx != -1:
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i in range(start_idx, len(text)):
+                ch = text[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == '\\':
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == opener:
+                    depth += 1
+                elif ch == closer:
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start_idx:i + 1]
+                        result = _parse_json_data(candidate)
+                        if result:
+                            return result
+                        break
+            # Try next occurrence of opener
+            start_idx = text.find(opener, start_idx + 1)
 
     return []
+
+
+def _parse_json_data(raw: str) -> list[SpeakerSegment]:
+    """Parse a raw JSON string into a list of SpeakerSegments."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    # Handle {segments: [...]} wrapper
+    if isinstance(data, dict) and "segments" in data:
+        data = data["segments"]
+
+    if not isinstance(data, list):
+        return []
+
+    segments = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            seg = SpeakerSegment(
+                speaker_label=str(item.get("speaker", item.get("speaker_label", "Unknown"))),
+                start_time=float(item.get("start", item.get("start_time", 0))),
+                end_time=float(item.get("end", item.get("end_time", 0))),
+                text=str(item.get("text", "")),
+            )
+            if seg.duration > 0:
+                segments.append(seg)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    return segments if segments else []
 
 
 def _parse_text_speakers(text: str) -> list[SpeakerSegment]:

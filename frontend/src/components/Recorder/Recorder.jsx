@@ -175,10 +175,6 @@ const Recorder = ({ onRecorded, onSaved }) => {
       micStreamRef.current = micStream;
 
       // 2. Get system audio via screen share
-      // Enable loopback audio handler in Electron main process first
-      if (window.electronAPI?.enableLoopbackAudio) {
-        await window.electronAPI.enableLoopbackAudio();
-      }
       let sysStream;
       try {
         sysStream = await navigator.mediaDevices.getDisplayMedia({

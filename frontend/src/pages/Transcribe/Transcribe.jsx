@@ -140,7 +140,7 @@ const Transcribe = () => {
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>支持 MP3, WAV, M4A, FLAC 等</p>
             </div>
           )}
-          <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+          <input ref={fileInputRef} type="file" accept="audio/*,video/*,audio/mp4,audio/x-m4a,audio/aac,.m4a,.mp3,.wav,.ogg,.flac,.aac,.wma,.opus,.webm,.mp4,.mov,.mkv,.caf" onChange={handleFileSelect} style={{ display: 'none' }} />
         </div>
       </div>
 

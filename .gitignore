@@ -12,12 +12,8 @@ __pycache__/
 # ── Build artifacts (PyInstaller) ───────────────────
 build/
 dist/
-flask_dist/
-*.spec.bak
 
-# ── Electron build artifacts ────────────────────────
-electron/dist/
-electron/node_modules/
+*.spec.bak
 
 # ── Frontend build artifacts ────────────────────────
 node_modules/

@@ -76,10 +76,17 @@
   let timerStart = 0;
   let pollTimer = null;
   let providerConfigs = {}; // { provider: { baseUrl, apiKey, model } }
-  let lastRecordTick = 0;   // for system sleep detection
-  let isRecording = false;  // stable flag for event listeners
+  let lastRecordTick = 0; // for system sleep detection
+  let isRecording = false; // stable flag for event listeners
 
-  const SPEAKER_COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#5856D6"];
+  const SPEAKER_COLORS = [
+    "#007AFF",
+    "#34C759",
+    "#FF9500",
+    "#AF52DE",
+    "#FF3B30",
+    "#5856D6",
+  ];
 
   // Speaker-related state
   const speakerCard = $("speakerCard");
@@ -96,7 +103,7 @@
       url: "https://generativelanguage.googleapis.com/v1beta/openai",
       model: "gemini-2.5-flash",
       link: "https://aistudio.google.com/apikey",
-      serverKey: true,  // API key managed by server
+      serverKey: true, // API key managed by server
     },
     aliyun: {
       url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -133,7 +140,7 @@
 
     const isCustom = p === "custom";
     const providerInfo = PROVIDERS[p];
-    
+
     // Get stored config for this provider or use defaults
     const config = providerConfigs[p] || {};
 
@@ -165,15 +172,19 @@
       modelInput.value = config.model || providerInfo.model;
       apiKeyInput.value = config.apiKey || "";
     } else {
-      baseUrlInput.value = config.baseUrl || (providerInfo ? providerInfo.url : "");
-      modelInput.value = config.model || (providerInfo ? providerInfo.model : "");
+      baseUrlInput.value =
+        config.baseUrl || (providerInfo ? providerInfo.url : "");
+      modelInput.value =
+        config.model || (providerInfo ? providerInfo.model : "");
       apiKeyInput.value = config.apiKey || "";
     }
 
     if (providerInfo && providerInfo.link) {
       getKeyLink.href = providerInfo.link;
       getKeyLink.style.display = "inline-block";
-      getKeyLink.textContent = providerInfo.serverKey ? "🔗 查看官网" : "🔗 去注册领取免费额度";
+      getKeyLink.textContent = providerInfo.serverKey
+        ? "🔗 查看官网"
+        : "🔗 去注册领取免费额度";
     } else {
       getKeyLink.style.display = "none";
     }
@@ -185,13 +196,13 @@
     // Save current before switching to load next
     const prevProvider = localStorage.getItem("lastSavedProvider");
     if (prevProvider) {
-        // We sync on every change to avoid loss
-        providerConfigs[prevProvider] = {
-            baseUrl: baseUrlInput.value,
-            model: modelInput.value,
-            apiKey: apiKeyInput.value
-        };
-        localStorage.setItem("providerConfigs", JSON.stringify(providerConfigs));
+      // We sync on every change to avoid loss
+      providerConfigs[prevProvider] = {
+        baseUrl: baseUrlInput.value,
+        model: modelInput.value,
+        apiKey: apiKeyInput.value,
+      };
+      localStorage.setItem("providerConfigs", JSON.stringify(providerConfigs));
     }
     updateProviderUI();
     localStorage.setItem("lastSavedProvider", providerSelect.value);
@@ -215,7 +226,7 @@
     localStorage.setItem("audioTranscriberConfig", JSON.stringify(globalCfg));
     localStorage.setItem("providerConfigs", JSON.stringify(providerConfigs));
     localStorage.setItem("lastSavedProvider", p);
-    
+
     pillModel.textContent = modelInput.value || "未配置";
   }
 
@@ -238,15 +249,15 @@
     providerSelect.value = cfg.provider || "openai";
     maxMinInput.value = cfg.maxMinutes || 10;
     maxMBInput.value = cfg.maxMB || 20;
-    
+
     // Migration from old flat config to provider map if needed
     if (!rawProviders && cfg.apiKey) {
-        providerConfigs[cfg.provider || "openai"] = {
-            baseUrl: cfg.baseUrl,
-            model: cfg.model,
-            apiKey: cfg.apiKey
-        };
-        localStorage.setItem("providerConfigs", JSON.stringify(providerConfigs));
+      providerConfigs[cfg.provider || "openai"] = {
+        baseUrl: cfg.baseUrl,
+        model: cfg.model,
+        apiKey: cfg.apiKey,
+      };
+      localStorage.setItem("providerConfigs", JSON.stringify(providerConfigs));
     }
 
     localStorage.setItem("lastSavedProvider", providerSelect.value);
@@ -292,7 +303,7 @@
           base_url: baseUrlInput.value,
           model: modelInput.value,
           api_key: apiKeyInput.value,
-          provider: providerSelect.value || 'openai'
+          provider: providerSelect.value || "openai",
         }),
       });
       const data = await res.json();
@@ -341,11 +352,15 @@
       // Prompt for permission if not already granted to get labels
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const mics = devices.filter(d => d.kind === 'audioinput');
-      
-      micSelect.innerHTML = mics.map(m => 
-        `<option value="${m.deviceId}">${m.label || '默认麦克风'}</option>`
-      ).join('') || '<option value="">无可用设备</option>';
+      const mics = devices.filter((d) => d.kind === "audioinput");
+
+      micSelect.innerHTML =
+        mics
+          .map(
+            (m) =>
+              `<option value="${m.deviceId}">${m.label || "默认麦克风"}</option>`,
+          )
+          .join("") || '<option value="">无可用设备</option>';
     } catch (err) {
       micSelect.innerHTML = '<option value="">无法访问麦克风</option>';
       console.error("enumerateDevices error:", err);
@@ -356,39 +371,27 @@
   startRecordBtn.addEventListener("click", async () => {
     try {
       recordedChunks = [];
-      
+
       // 1. Get Microphone stream with selected device
-      const micConstraints = { 
-        audio: micSelect.value ? { deviceId: { exact: micSelect.value } } : true 
+      const micConstraints = {
+        audio: micSelect.value
+          ? { deviceId: { exact: micSelect.value } }
+          : true,
       };
       micStream = await navigator.mediaDevices.getUserMedia(micConstraints);
-      
+
       // 2. Get System Audio stream via getDisplayMedia
-      // Enable loopback audio handler in Electron main process first
-      if (window.electronAPI && window.electronAPI.enableLoopbackAudio) {
-        await window.electronAPI.enableLoopbackAudio();
-      }
       try {
-        systemStream = await navigator.mediaDevices.getDisplayMedia({ 
-          video: true, 
-          audio: true 
+        systemStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
         });
         // We only need audio - stop any video tracks immediately
-        systemStream.getVideoTracks().forEach(t => t.stop());
+        systemStream.getVideoTracks().forEach((t) => t.stop());
       } catch (err) {
-        micStream.getTracks().forEach(t => t.stop());
-        console.error('[Recording] getDisplayMedia failed:', err);
-        // Check permission status if available
-        let hint = '';
-        if (window.electronAPI && window.electronAPI.getScreenPermissionStatus) {
-          const status = await window.electronAPI.getScreenPermissionStatus();
-          if (status === 'denied' || status === 'restricted') {
-            hint = '\n请前往"系统设置 → 隐私与安全性 → 屏幕录制"，将 Electron.app 添加到列表中并开启权限，然后重启应用。';
-          } else if (status === 'not-determined') {
-            hint = '\n请在弹出的权限对话框中点击"允许"，然后重启应用重试。';
-          }
-        }
-        throw new Error(`无法获取系统音频。${hint || '\n请确认已授予屏幕录制权限并重启应用。'}`);
+        micStream.getTracks().forEach((t) => t.stop());
+        console.error("[Recording] getDisplayMedia failed:", err);
+        throw new Error("无法获取系统音频。\n请确认已授予屏幕录制权限并重试。");
       }
 
       audioCtx = new AudioContext();
@@ -408,25 +411,31 @@
         sysSource.connect(sysGainNode);
         sysGainNode.connect(destination);
       } else {
-        micStream.getTracks().forEach(t => t.stop());
-        systemStream.getTracks().forEach(t => t.stop());
+        micStream.getTracks().forEach((t) => t.stop());
+        systemStream.getTracks().forEach((t) => t.stop());
         throw new Error("未检测到系统音轨。请确保在共享时勾选了“共享音频”。");
       }
 
       combinedStream = destination.stream;
-      mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'audio/webm' });
-      
+      mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: "audio/webm",
+      });
+
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) recordedChunks.push(e.data);
       };
-      
+
       mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-        const file = new File([blob], `recording_${new Date().getTime()}.webm`, { type: 'audio/webm' });
-        
+        const blob = new Blob(recordedChunks, { type: "audio/webm" });
+        const file = new File(
+          [blob],
+          `recording_${new Date().getTime()}.webm`,
+          { type: "audio/webm" },
+        );
+
         // Clean up
-        micStream.getTracks().forEach(t => t.stop());
-        systemStream.getTracks().forEach(t => t.stop());
+        micStream.getTracks().forEach((t) => t.stop());
+        systemStream.getTracks().forEach((t) => t.stop());
         audioCtx.close();
         audioCtx = null;
 
@@ -437,18 +446,18 @@
 
       mediaRecorder.start(5000); // flush data every 5 seconds for crash safety
       isRecording = true;
-      
+
       // UI Update
       startRecordBtn.disabled = true;
       startRecordBtn.classList.add("recording");
       startRecordBtn.textContent = "正在录制...";
       stopRecordBtn.disabled = false;
       micSelect.disabled = true;
-      
+
       sourceToggles.style.display = "flex";
       toggleMicBtn.classList.add("active");
       toggleSysBtn.classList.add("active");
-      
+
       recordTimeStart = Date.now();
       lastRecordTick = Date.now();
       recordTimer.textContent = "00:00";
@@ -457,13 +466,12 @@
         const diff = Date.now() - recordTimeStart;
         const s = Math.floor(diff / 1000) % 60;
         const m = Math.floor(diff / 60000);
-        recordTimer.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        recordTimer.textContent = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
       }, 1000);
 
       // Register sleep detection listeners
-      document.addEventListener('visibilitychange', handleSleepWake);
-      window.addEventListener('beforeunload', handleBeforeUnload);
-
+      document.addEventListener("visibilitychange", handleSleepWake);
+      window.addEventListener("beforeunload", handleBeforeUnload);
     } catch (err) {
       showToast("❌ 录制失败: " + err.message, "error");
       console.error(err);
@@ -495,17 +503,19 @@
     stopRecordBtn.disabled = true;
     micSelect.disabled = false;
     // Remove sleep detection listeners
-    document.removeEventListener('visibilitychange', handleSleepWake);
-    window.removeEventListener('beforeunload', handleBeforeUnload);
+    document.removeEventListener("visibilitychange", handleSleepWake);
+    window.removeEventListener("beforeunload", handleBeforeUnload);
   });
 
   // ── System Sleep/Hibernation Detection ────────────────────
   function handleSleepWake() {
-    if (document.visibilityState === 'visible' && isRecording) {
+    if (document.visibilityState === "visible" && isRecording) {
       const now = Date.now();
       const gap = now - lastRecordTick;
       if (gap > 30000) {
-        console.warn(`[Recorder] System sleep detected (gap: ${Math.round(gap / 1000)}s). Auto-stopping recording.`);
+        console.warn(
+          `[Recorder] System sleep detected (gap: ${Math.round(gap / 1000)}s). Auto-stopping recording.`,
+        );
         emergencyStopRecording();
       }
     }
@@ -515,7 +525,7 @@
     if (isRecording) {
       emergencyStopRecording();
       e.preventDefault();
-      e.returnValue = '';
+      e.returnValue = "";
     }
   }
 
@@ -524,28 +534,38 @@
     isRecording = false;
 
     // Try to gracefully stop MediaRecorder
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
       try {
         mediaRecorder.stop();
       } catch {
         // If stop() fails, do emergency save with existing chunks
         if (recordedChunks.length > 0) {
-          const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-          const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
+          const blob = new Blob(recordedChunks, { type: "audio/webm" });
+          const file = new File([blob], `recording_${Date.now()}.webm`, {
+            type: "audio/webm",
+          });
           // Clean up streams
-          micStream?.getTracks().forEach(t => t.stop());
-          systemStream?.getTracks().forEach(t => t.stop());
-          if (audioCtx) { audioCtx.close(); audioCtx = null; }
+          micStream?.getTracks().forEach((t) => t.stop());
+          systemStream?.getTracks().forEach((t) => t.stop());
+          if (audioCtx) {
+            audioCtx.close();
+            audioCtx = null;
+          }
           selectFile(file);
         }
       }
     } else if (recordedChunks.length > 0) {
       // MediaRecorder already inactive, save whatever we have
-      const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-      const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
-      micStream?.getTracks().forEach(t => t.stop());
-      systemStream?.getTracks().forEach(t => t.stop());
-      if (audioCtx) { audioCtx.close(); audioCtx = null; }
+      const blob = new Blob(recordedChunks, { type: "audio/webm" });
+      const file = new File([blob], `recording_${Date.now()}.webm`, {
+        type: "audio/webm",
+      });
+      micStream?.getTracks().forEach((t) => t.stop());
+      systemStream?.getTracks().forEach((t) => t.stop());
+      if (audioCtx) {
+        audioCtx.close();
+        audioCtx = null;
+      }
       selectFile(file);
     }
 
@@ -560,8 +580,8 @@
     showToast("⚠️ 检测到系统休眠，录音已自动保存", "success");
 
     // Clean up listeners
-    document.removeEventListener('visibilitychange', handleSleepWake);
-    window.removeEventListener('beforeunload', handleBeforeUnload);
+    document.removeEventListener("visibilitychange", handleSleepWake);
+    window.removeEventListener("beforeunload", handleBeforeUnload);
   }
 
   async function selectFile(file) {
@@ -623,8 +643,11 @@
     form.append("base_url", baseUrlInput.value);
     form.append("api_key", apiKeyInput.value);
     form.append("model", modelInput.value);
-    form.append("provider", providerSelect.value || 'openai');
-    form.append("enable_diarization", $("diarizeToggle").checked ? "true" : "false");
+    form.append("provider", providerSelect.value || "openai");
+    form.append(
+      "enable_diarization",
+      $("diarizeToggle").checked ? "true" : "false",
+    );
 
     try {
       const res = await fetch("/api/upload", { method: "POST", body: form });
@@ -933,8 +956,7 @@
         cfg.demo_files.forEach((f) => {
           const btn = document.createElement("button");
           btn.className = "demo-file-btn";
-          btn.innerHTML =
-            `<span>\uD83C\uDFB5</span> ${esc(f.name)} <span class="demo-file-size">${f.size_mb} MB</span>`;
+          btn.innerHTML = `<span>\uD83C\uDFB5</span> ${esc(f.name)} <span class="demo-file-size">${f.size_mb} MB</span>`;
           btn.addEventListener("click", () => loadDemoFile(f.name));
           demoFilesGrid.appendChild(btn);
         });
@@ -951,7 +973,10 @@
       const blob = await res.blob();
       const file = new File([blob], filename, { type: blob.type });
       selectFile(file);
-      showToast("\u2705 \u5DF2\u52A0\u8F7D\u6D4B\u8BD5\u97F3\u9891: " + filename, "success");
+      showToast(
+        "\u2705 \u5DF2\u52A0\u8F7D\u6D4B\u8BD5\u97F3\u9891: " + filename,
+        "success",
+      );
     } catch (err) {
       showToast("\u274C \u52A0\u8F7D\u5931\u8D25: " + err.message, "error");
     }
@@ -970,14 +995,18 @@
       } else if (res.status === 401) {
         window.location.href = "/login";
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
       try {
         await fetch("/api/auth/logout", { method: "POST" });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       window.location.href = "/login";
     });
   }
@@ -1006,7 +1035,9 @@
           }
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   })();
 
   // ── Speaker Results Rendering ──────────────────────────────
@@ -1025,12 +1056,15 @@
 
       let clipsHtml = "";
       if (s.clips && s.clips.length > 0) {
-        clipsHtml = s.clips.map(c =>
-          `<button class="btn-clip" onclick="this.nextElementSibling.paused ? this.nextElementSibling.play() : this.nextElementSibling.pause()">
+        clipsHtml = s.clips
+          .map(
+            (c) =>
+              `<button class="btn-clip" onclick="this.nextElementSibling.paused ? this.nextElementSibling.play() : this.nextElementSibling.pause()">
             ▶ ${c.duration}s
           </button>
-          <audio src="/api/clips/${c.filename}" preload="none"></audio>`
-        ).join(" ");
+          <audio src="/api/clips/${c.filename}" preload="none"></audio>`,
+          )
+          .join(" ");
       }
 
       card.innerHTML = `
@@ -1057,10 +1091,10 @@
     }
 
     const speakerData = [];
-    speakerResults.querySelectorAll(".speaker-name-input").forEach(input => {
+    speakerResults.querySelectorAll(".speaker-name-input").forEach((input) => {
       const label = input.dataset.label;
       const name = input.value.trim() || label;
-      const sp = lastSpeakers.find(s => s.label === label);
+      const sp = lastSpeakers.find((s) => s.label === label);
       speakerData.push({
         label,
         name,
@@ -1082,8 +1116,8 @@
         if (data.transcript) {
           renderTranscript(data.transcript);
         }
-        const created = data.saved.filter(s => s.action === "created").length;
-        const updated = data.saved.filter(s => s.action === "updated").length;
+        const created = data.saved.filter((s) => s.action === "created").length;
+        const updated = data.saved.filter((s) => s.action === "updated").length;
         let msg = "✅ ";
         if (created > 0) msg += `新增 ${created} 个`;
         if (created > 0 && updated > 0) msg += "，";
@@ -1124,10 +1158,13 @@
 
         let clipsHtml = "";
         if (p.clips && p.clips.length > 0) {
-          clipsHtml = p.clips.map(c =>
-            `<button class="btn-clip" onclick="this.nextElementSibling.paused ? this.nextElementSibling.play() : this.nextElementSibling.pause()">▶ ${c.duration}s</button>
-             <audio src="/api/speakers/${p.id}/clips/${c.filename}" preload="none"></audio>`
-          ).join(" ");
+          clipsHtml = p.clips
+            .map(
+              (c) =>
+                `<button class="btn-clip" onclick="this.nextElementSibling.paused ? this.nextElementSibling.play() : this.nextElementSibling.pause()">▶ ${c.duration}s</button>
+             <audio src="/api/speakers/${p.id}/clips/${c.filename}" preload="none"></audio>`,
+            )
+            .join(" ");
         }
 
         item.innerHTML = `
@@ -1147,7 +1184,7 @@
       });
 
       // Wire up rename/delete buttons
-      libraryList.querySelectorAll("[data-action=rename]").forEach(btn => {
+      libraryList.querySelectorAll("[data-action=rename]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const id = btn.dataset.id;
           const name = prompt("输入新名称:");
@@ -1166,7 +1203,7 @@
         });
       });
 
-      libraryList.querySelectorAll("[data-action=delete]").forEach(btn => {
+      libraryList.querySelectorAll("[data-action=delete]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const id = btn.dataset.id;
           if (!confirm("确定要删除此说话人吗？")) return;
@@ -1179,8 +1216,9 @@
           }
         });
       });
-
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   refreshLibraryBtn.addEventListener("click", () => loadSpeakerLibrary());
