@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/authStore';
 
 const Register = () => {
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -16,10 +17,10 @@ const Register = () => {
     setError('');
     setIsLoading(true);
     try {
-      await register({ username, password });
+      await register({ username, email, password });
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.error || '注册失败');
+      setError(err.response?.data?.error?.message || '注册失败');
     } finally {
       setIsLoading(false);
     }
@@ -43,6 +44,17 @@ const Register = () => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
+              placeholder="请输入用户名"
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <label>电子邮箱</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              placeholder="请输入电子邮箱"
             />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -52,6 +64,7 @@ const Register = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              placeholder="请输入密码"
             />
           </div>
           {error && <div style={{ color: 'var(--error)', fontSize: '0.875rem' }}>{error}</div>}

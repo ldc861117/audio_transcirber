@@ -1,14 +1,32 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, FileAudio, History, Users, Settings, X } from 'lucide-react';
+import { 
+  LayoutDashboard, 
+  FileAudio, 
+  History, 
+  Users, 
+  Settings, 
+  X, 
+  CreditCard, 
+  UserCircle 
+} from 'lucide-react';
 import { motion as Motion, AnimatePresence } from 'framer-motion';
+import { useSubscriptionStore } from '../../stores/subscriptionStore';
 
 const Sidebar = ({ isOpen, isMobile, closeSidebar }) => {
+  const { subscription, fetchSubscription } = useSubscriptionStore();
+
+  useEffect(() => {
+    fetchSubscription();
+  }, [fetchSubscription]);
+
   const links = [
     { to: '/', label: '仪表盘', icon: <LayoutDashboard size={20} /> },
     { to: '/transcribe', label: '新转写', icon: <FileAudio size={20} /> },
     { to: '/history', label: '历史记录', icon: <History size={20} /> },
     { to: '/speakers', label: '声纹库', icon: <Users size={20} /> },
+    { to: '/pricing', label: '定价方案', icon: <CreditCard size={20} /> },
+    { to: '/account', label: '账户管理', icon: <UserCircle size={20} /> },
     { to: '/settings', label: '设置', icon: <Settings size={20} /> },
   ];
 
@@ -39,7 +57,9 @@ const Sidebar = ({ isOpen, isMobile, closeSidebar }) => {
         top: 0,
         left: 0,
         zIndex: 100,
-        overflowX: 'hidden'
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       {isMobile && isOpen && (
@@ -57,7 +77,7 @@ const Sidebar = ({ isOpen, isMobile, closeSidebar }) => {
         </button>
       )}
 
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: isMobile ? '3rem' : '0' }}>
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: isMobile ? '3rem' : '0', flex: 1 }}>
         {links.map(link => (
           <NavLink
             key={link.to}
@@ -84,6 +104,26 @@ const Sidebar = ({ isOpen, isMobile, closeSidebar }) => {
           </NavLink>
         ))}
       </nav>
+
+      {(isOpen || isMobile) && subscription && (
+        <div style={{
+          marginTop: 'auto',
+          padding: '1rem',
+          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+          borderRadius: '12px',
+          border: '1px solid var(--bg-tertiary)'
+        }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>当前方案</div>
+          <div style={{ 
+            fontSize: '0.9rem', 
+            fontWeight: 'bold', 
+            color: 'var(--accent-primary)',
+            textTransform: 'uppercase' 
+          }}>
+            {subscription.tier}
+          </div>
+        </div>
+      )}
     </Motion.aside>
   );
 };

@@ -5,8 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: '../static',
-    emptyOutDir: false,   // preserve login.html, register.html, style.css, app.js
+    outDir: 'dist', // Independent SPA build
   },
   server: {
     port: 3000,

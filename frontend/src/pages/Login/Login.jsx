@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 
 const Login = () => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -16,10 +16,10 @@ const Login = () => {
     setError('');
     setIsLoading(true);
     try {
-      await login({ username, password });
+      await login({ email, password });
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.error || '登录失败');
+      setError(err.response?.data?.error?.message || '登录失败');
     } finally {
       setIsLoading(false);
     }
@@ -37,12 +37,13 @@ const Login = () => {
         <h1 style={{ marginBottom: '1.5rem', textAlign: 'center' }}>登录</h1>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label>用户名</label>
+            <label>电子邮箱</label>
             <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               required
+              placeholder="请输入您的邮箱"
             />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -52,6 +53,7 @@ const Login = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              placeholder="请输入密码"
             />
           </div>
           {error && <div style={{ color: 'var(--error)', fontSize: '0.875rem' }}>{error}</div>}

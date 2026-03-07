@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useConfigStore, PROVIDER_DEFAULTS } from '../../stores/configStore';
-import { api } from '../../api/client';
+import { api } from '../../api/endpoints';
 
 const Settings = () => {
   const { provider, model, baseUrl, apiKey, setProvider, setField, resetConfig } = useConfigStore();
