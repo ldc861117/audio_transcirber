@@ -107,8 +107,9 @@ SUPPORTED_EXTENSIONS = {
 tasks: dict[int, dict[str, dict]] = {}
 
 # ── defaults (overridable per-request) ──────────────────────────
-DEFAULT_MAX_CHUNK_MINUTES = 60       # minutes per chunk
-DEFAULT_MAX_CHUNK_MB      = 100      # MB per chunk
+DEFAULT_MAX_CHUNK_MINUTES = 30       # minutes per chunk
+DEFAULT_MAX_CHUNK_MB      = 50       # MB per chunk
+DEFAULT_OVERLAP_MINUTES   = 2        # overlap between adjacent chunks
 
 # Load optional defaults from environment (for Quick Start / Test Mode)
 DEFAULT_BASE_URL = os.environ.get("custom_openai_baseurl", "")
@@ -140,20 +141,29 @@ DEMO_AUDIO_DIR.mkdir(exist_ok=True)
 #  Utilities
 # ================================================================
 
-def split_audio(filepath: str, max_minutes: int, max_mb: int, preferred_format: str = "mp3") -> list[str]:
+def split_audio(filepath: str, max_minutes: int, max_mb: int,
+                overlap_minutes: int = 2, preferred_format: str = "mp3") -> list[str]:
     """
-    Split an audio file by duration AND file-size constraints.
+    Split an audio file by duration AND file-size constraints,
+    with configurable overlap between adjacent chunks.
     Returns a list of temporary file paths for each chunk.
     """
     audio = AudioSegment.from_file(filepath)
     fmt = preferred_format if preferred_format in ["mp3", "m4a"] else "mp3"
 
     chunk_ms = max_minutes * 60 * 1000
+    overlap_ms = overlap_minutes * 60 * 1000
+    stride_ms = max(chunk_ms - overlap_ms, 60 * 1000)  # at least 1 min stride
     chunks_by_time: list[AudioSegment] = []
 
-    # First pass: split by time
-    for start in range(0, len(audio), chunk_ms):
-        chunks_by_time.append(audio[start:start + chunk_ms])
+    # First pass: split by time with overlap
+    pos = 0
+    while pos < len(audio):
+        end = min(pos + chunk_ms, len(audio))
+        chunks_by_time.append(audio[pos:end])
+        if end >= len(audio):
+            break
+        pos += stride_ms
 
     # Second pass: further split any chunk that exceeds max_mb
     final_chunks: list[AudioSegment] = []
@@ -271,7 +281,7 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
                 ],
             }
         ],
-        "max_tokens": 8192,
+        "max_tokens": 16384,
     }
 
     # Special: Zhipu Thinking parameter
@@ -279,13 +289,20 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
         kwargs["extra_body"] = {"thinking": True}
 
     response = client.chat.completions.create(**kwargs)
+
+    # Detect truncation: finish_reason == "length" means token limit was hit
+    finish_reason = getattr(response.choices[0], 'finish_reason', None)
+    if finish_reason == "length":
+        print(f"⚠️ [Transcribe] Response truncated by token limit (max_tokens=16384) for chunk: {chunk_path}")
+
     return response.choices[0].message.content.strip()
 
 
 def run_transcription(task_id: str, filepath: str,
                       base_url: str, api_key: str, model: str,
                       max_minutes: int, max_mb: int, provider: str = "openai",
-                      user_id: int = 0, enable_diarization: bool = False):
+                      user_id: int = 0, enable_diarization: bool = False,
+                      overlap_minutes: int = 2):
     """Background worker: split -> transcribe -> (optional) diarize -> merge."""
     task = tasks[user_id][task_id]
     original_filepath = filepath
@@ -293,7 +310,8 @@ def run_transcription(task_id: str, filepath: str,
         # -- 1. Split ------------------------------------------------
         task["status"] = "splitting"
         pref_fmt = "m4a" if provider == "zhipu" else "mp3"
-        chunks = split_audio(filepath, max_minutes, max_mb, preferred_format=pref_fmt)
+        chunks = split_audio(filepath, max_minutes, max_mb,
+                             overlap_minutes=overlap_minutes, preferred_format=pref_fmt)
         task["total_chunks"] = len(chunks)
         task["status"] = "transcribing"
 
@@ -348,10 +366,33 @@ def run_transcription(task_id: str, filepath: str,
                             f"\u3010{seg.speaker_label}\u3011{seg.text}"
                         )
                 else:
-                    all_segments_text.append(r)
+                    # Fallback: if response looks like JSON, don't store raw JSON
+                    stripped = r.strip()
+                    if (stripped.startswith('{') or stripped.startswith('[')) and '"text"' in stripped:
+                        import re as _re
+                        text_values = _re.findall(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', r)
+                        if text_values:
+                            for tv in text_values:
+                                tv_clean = tv.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                all_segments_text.append(tv_clean)
+                            print(f"⚠️ [Transcribe] Recovered {len(text_values)} text segments from raw JSON response")
+                        else:
+                            all_segments_text.append(r)
+                    else:
+                        all_segments_text.append(r)
             task["transcript"] = "\n\n".join(all_segments_text)
         else:
-            task["transcript"] = "\n\n".join(results)
+            # LLM-based stitching for overlapping chunks
+            if len(results) > 1 and overlap_minutes > 0:
+                task["status"] = "stitching"
+                try:
+                    from services.stitch_service import stitch_transcripts
+                    task["transcript"] = stitch_transcripts(results, client, model)
+                except Exception as stitch_err:
+                    print(f"⚠️ LLM stitching failed, falling back to join: {stitch_err}")
+                    task["transcript"] = "\n\n".join(results)
+            else:
+                task["transcript"] = "\n\n".join(results)
 
         # -- 4. Speaker diarization (optional) -----------------------
         if enable_diarization:
@@ -561,8 +602,9 @@ def upload():
     if not all([base_url, api_key, model]):
         return jsonify({"error": "\u8bf7\u586b\u5199 Base URL\u3001API Key \u548c Model\uff0c\u6216\u914d\u7f6e\u670d\u52a1\u7aef\u9ed8\u8ba4\u503c"}), 400
 
-    max_minutes = int(request.form.get("max_minutes", DEFAULT_MAX_CHUNK_MINUTES))
-    max_mb      = int(request.form.get("max_mb", DEFAULT_MAX_CHUNK_MB))
+    max_minutes     = int(request.form.get("max_minutes", DEFAULT_MAX_CHUNK_MINUTES))
+    max_mb          = int(request.form.get("max_mb", DEFAULT_MAX_CHUNK_MB))
+    overlap_minutes = int(request.form.get("overlap_minutes", DEFAULT_OVERLAP_MINUTES))
     enable_diarization = request.form.get("enable_diarization", "false").lower() == "true"
 
     # Save uploaded file
@@ -608,7 +650,8 @@ def upload():
     t = threading.Thread(
         target=run_transcription,
         args=(task_id, save_path, base_url, api_key, model,
-              max_minutes, max_mb, provider, uid, enable_diarization),
+              max_minutes, max_mb, provider, uid, enable_diarization,
+              overlap_minutes),
         daemon=True,
     )
     t.start()

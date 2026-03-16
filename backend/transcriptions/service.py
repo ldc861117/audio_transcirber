@@ -20,7 +20,8 @@ class TranscriptionService:
     def run_transcription(task_id: str, filepath: str,
                           base_url: str, api_key: str, model: str,
                           max_minutes: int, max_mb: int, provider: str = "openai",
-                          user_id: int = 0, enable_diarization: bool = False):
+                          user_id: int = 0, enable_diarization: bool = False,
+                          overlap_minutes: int = 2):
         """Background worker: split -> transcribe -> (optional) diarize -> merge."""
         
         # Integration with Track B QuotaService would go here
@@ -35,21 +36,25 @@ class TranscriptionService:
         if user_id not in tasks:
             tasks[user_id] = {}
         
-        task = {
+        # Merge with existing task data (upload route pre-populates filename, created_at, etc.)
+        existing = tasks[user_id].get(task_id, {})
+        existing.update({
             "status": "splitting",
             "chunk_results": [],
             "completed_chunks": 0,
             "total_chunks": 0,
             "transcript": "",
             "error": "",
-            "speakers": []
-        }
-        tasks[user_id][task_id] = task
+            "speakers": [],
+        })
+        tasks[user_id][task_id] = existing
+        task = existing
 
         try:
             # -- 1. Split ------------------------------------------------
             pref_fmt = "m4a" if provider == "zhipu" else "mp3"
-            chunks = split_audio(filepath, max_minutes, max_mb, preferred_format=pref_fmt)
+            chunks = split_audio(filepath, max_minutes, max_mb,
+                                 overlap_minutes=overlap_minutes, preferred_format=pref_fmt)
             task["total_chunks"] = len(chunks)
             task["status"] = "transcribing"
 
@@ -103,10 +108,34 @@ class TranscriptionService:
                                 f"\u3010{seg.speaker_label}\u3011{seg.text}"
                             )
                     else:
-                        all_segments_text.append(r)
+                        # Fallback: if response looks like JSON, don't store raw JSON
+                        stripped = r.strip()
+                        if (stripped.startswith('{') or stripped.startswith('[')) and '"text"' in stripped:
+                            # Extract text values via regex as last resort
+                            import re as _re
+                            text_values = _re.findall(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', r)
+                            if text_values:
+                                for tv in text_values:
+                                    tv_clean = tv.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                    all_segments_text.append(tv_clean)
+                                print(f"⚠️ [Backend] Recovered {len(text_values)} text segments from raw JSON response")
+                            else:
+                                all_segments_text.append(r)
+                        else:
+                            all_segments_text.append(r)
                 task["transcript"] = "\n\n".join(all_segments_text)
             else:
-                task["transcript"] = "\n\n".join(results)
+                # LLM-based stitching for overlapping chunks
+                if len(results) > 1 and overlap_minutes > 0:
+                    task["status"] = "stitching"
+                    try:
+                        from services.stitch_service import stitch_transcripts
+                        task["transcript"] = stitch_transcripts(results, client, model)
+                    except Exception as stitch_err:
+                        print(f"⚠️ LLM stitching failed, falling back to join: {stitch_err}")
+                        task["transcript"] = "\n\n".join(results)
+                else:
+                    task["transcript"] = "\n\n".join(results)
 
             # -- 4. Speaker diarization (optional) -----------------------
             if enable_diarization:

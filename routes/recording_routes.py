@@ -35,6 +35,7 @@ def _get_app_context():
         _app_context["DEFAULT_MODEL"] = main_app.DEFAULT_MODEL
         _app_context["DEFAULT_MAX_CHUNK_MINUTES"] = main_app.DEFAULT_MAX_CHUNK_MINUTES
         _app_context["DEFAULT_MAX_CHUNK_MB"] = main_app.DEFAULT_MAX_CHUNK_MB
+        _app_context["DEFAULT_OVERLAP_MINUTES"] = main_app.DEFAULT_OVERLAP_MINUTES
         _app_context["TEST_MODE"] = main_app.TEST_MODE
         _app_context["SERVER_ENV_SENTINEL"] = main_app.SERVER_ENV_SENTINEL
     return _app_context
@@ -137,8 +138,9 @@ def transcribe_recording(task_id):
     if not all([base_url, api_key, model]):
         return jsonify({"error": "请配置 API 参数"}), 400
 
-    max_minutes = int(data.get("max_minutes", ctx["DEFAULT_MAX_CHUNK_MINUTES"]))
-    max_mb = int(data.get("max_mb", ctx["DEFAULT_MAX_CHUNK_MB"]))
+    max_minutes      = int(data.get("max_minutes", ctx["DEFAULT_MAX_CHUNK_MINUTES"]))
+    max_mb           = int(data.get("max_mb", ctx["DEFAULT_MAX_CHUNK_MB"]))
+    overlap_minutes  = int(data.get("overlap_minutes", ctx["DEFAULT_OVERLAP_MINUTES"]))
 
     # Create in-memory task for live progress tracking
     tasks = ctx["tasks"]
@@ -173,7 +175,8 @@ def transcribe_recording(task_id):
     t = threading.Thread(
         target=ctx["run_transcription"],
         args=(task_id, save_path, base_url, api_key, model,
-              max_minutes, max_mb, provider, uid, enable_diarization),
+              max_minutes, max_mb, provider, uid, enable_diarization,
+              overlap_minutes),
         daemon=True,
     )
     t.start()
