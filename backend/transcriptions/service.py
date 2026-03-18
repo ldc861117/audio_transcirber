@@ -1,9 +1,35 @@
 import os
+import time
 import logging
 import traceback
+from datetime import datetime, timezone
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+
+def _log_event(task: dict, stage: str, message: str, **extra):
+    """Append a structured event to the task's pipeline_log."""
+    now = datetime.now(timezone.utc)
+    entry = {
+        "stage": stage,
+        "message": message,
+        "timestamp": now.isoformat(),
+    }
+    # Calculate duration since the stage started (if _stage_start is set)
+    stage_start = task.get("_stage_start")
+    if stage_start:
+        entry["duration_ms"] = round((time.monotonic() - stage_start) * 1000)
+    entry.update(extra)
+    task.setdefault("pipeline_log", []).append(entry)
+    logger.info(f"[{task.get('id', '?')}] [{stage}] {message}")
+
+
+def _start_stage(task: dict, stage: str, message: str):
+    """Mark stage start and log it."""
+    task["status"] = stage
+    task["_stage_start"] = time.monotonic()
+    _log_event(task, stage, message)
 from .audio_utils import split_audio
 from .gemini_provider import transcribe_chunk
 
@@ -41,7 +67,9 @@ class TranscriptionService:
         
         # Merge with existing task data (upload route pre-populates filename, created_at, etc.)
         existing = tasks[user_id].get(task_id, {})
+        started_at = datetime.now(timezone.utc).isoformat()
         existing.update({
+            "id": task_id,
             "status": "splitting",
             "chunk_results": [],
             "completed_chunks": 0,
@@ -49,17 +77,23 @@ class TranscriptionService:
             "transcript": "",
             "error": "",
             "speakers": [],
+            "pipeline_log": [],
+            "started_at": started_at,
+            "completed_at": None,
+            "elapsed_seconds": 0,
         })
         tasks[user_id][task_id] = existing
         task = existing
+        pipeline_t0 = time.monotonic()
 
         try:
             # -- 1. Split ------------------------------------------------
+            _start_stage(task, "splitting", "开始分割音频")
             pref_fmt = "m4a" if provider == "zhipu" else "mp3"
             chunks = split_audio(filepath, max_minutes, max_mb,
                                  overlap_minutes=overlap_minutes, preferred_format=pref_fmt)
             task["total_chunks"] = len(chunks)
-            task["status"] = "transcribing"
+            _log_event(task, "splitting", f"分割完成，共 {len(chunks)} 段", chunk_count=len(chunks))
 
             # -- 2. Transcribe each chunk --------------------------------
             if provider == "zhipu" and ZhipuAI:
@@ -70,7 +104,7 @@ class TranscriptionService:
             # -- 2a. Speaker Census pre-pass (diarization only) ----------
             census_context = ""
             if enable_diarization:
-                task["status"] = "censusing"
+                _start_stage(task, "censusing", "开始说话人普查")
                 try:
                     from .speaker_census import run_speaker_census, build_census_context
                     census_result = run_speaker_census(
@@ -79,18 +113,19 @@ class TranscriptionService:
                     census_context = build_census_context(census_result)
                     if census_result:
                         task["census"] = census_result
-                        print(f"✅ [Pipeline] Census complete: {census_result.get('speaker_count', '?')} speakers")
+                        _log_event(task, "censusing", f"普查完成: {census_result.get('speaker_count', '?')} 位说话人")
                     else:
-                        print("ℹ️ [Pipeline] Census returned no result, proceeding without")
+                        _log_event(task, "censusing", "普查无结果，继续处理")
                 except Exception as e:
-                    print(f"⚠️ [Pipeline] Census failed, proceeding without: {e}")
-                task["status"] = "transcribing"
+                    _log_event(task, "censusing", f"普查失败: {e}", error=True)
 
             results: list[str] = []
             chunk_paths_kept: list[str] = []  # keep for diarization
 
+            _start_stage(task, "transcribing", f"开始转写 {len(chunks)} 段音频")
             for i, chunk_path in enumerate(chunks):
                 task["current_chunk"] = i + 1
+                chunk_t0 = time.monotonic()
                 try:
                     text = transcribe_chunk(
                         chunk_path, client, model, provider=provider,
@@ -98,20 +133,31 @@ class TranscriptionService:
                         census_context=census_context,
                     )
                     results.append(text)
+                    chunk_ms = round((time.monotonic() - chunk_t0) * 1000)
+                    char_count = len(text)
                     task["chunk_results"].append({
                         "index": i + 1,
                         "status": "done",
                         "text": text,
                     })
+                    _log_event(task, "transcribing",
+                               f"分段 {i+1}/{len(chunks)} 完成 ({chunk_ms/1000:.1f}s, {char_count}字)",
+                               chunk_index=i+1, duration_ms=chunk_ms, char_count=char_count)
                 except Exception as e:
                     err_msg = str(e)
+                    chunk_ms = round((time.monotonic() - chunk_t0) * 1000)
                     task["chunk_results"].append({
                         "index": i + 1,
                         "status": "error",
                         "text": err_msg,
                     })
+                    _log_event(task, "transcribing",
+                               f"分段 {i+1}/{len(chunks)} 失败: {err_msg[:80]}",
+                               chunk_index=i+1, duration_ms=chunk_ms, error=True)
                 finally:
                     task["completed_chunks"] = i + 1
+                    # Update elapsed time for frontend
+                    task["elapsed_seconds"] = round(time.monotonic() - pipeline_t0, 1)
                     if enable_diarization:
                         chunk_paths_kept.append(chunk_path)
                     else:
@@ -151,7 +197,7 @@ class TranscriptionService:
                                         if isinstance(item, dict) and 'text' in item:
                                             speaker = item.get('speaker', '未知')
                                             all_segments_text.append(f"\u3010{speaker}\u3011{item['text']}")
-                                    print(f"\u2705 [Backend] Recovered {len(data)} segments after stripping markdown fences")
+                                    _log_event(task, "transcribing", f"从 markdown 围栏中恢复 {len(data)} 段")
                                     continue
                             except (json.JSONDecodeError, ValueError):
                                 pass
@@ -164,7 +210,7 @@ class TranscriptionService:
                                     tv_clean = tv.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
                                     sp = speaker_values[idx_tv] if idx_tv < len(speaker_values) else '未知'
                                     all_segments_text.append(f"\u3010{sp}\u3011{tv_clean}")
-                                print(f"\u26a0\ufe0f [Backend] Recovered {len(text_values)} text segments via regex")
+                                _log_event(task, "transcribing", f"通过正则恢复 {len(text_values)} 段文本")
                             else:
                                 all_segments_text.append(r)
                         else:
@@ -173,19 +219,20 @@ class TranscriptionService:
             else:
                 # LLM-based stitching for overlapping chunks
                 if len(results) > 1 and overlap_minutes > 0:
-                    task["status"] = "stitching"
+                    _start_stage(task, "stitching", f"开始拼接 {len(results)} 段重叠文本")
                     try:
                         from services.stitch_service import stitch_transcripts
                         task["transcript"] = stitch_transcripts(results, client, model)
+                        _log_event(task, "stitching", "拼接完成")
                     except Exception as stitch_err:
-                        print(f"⚠️ LLM stitching failed, falling back to join: {stitch_err}")
+                        _log_event(task, "stitching", f"拼接失败，回退拼接: {stitch_err}", error=True)
                         task["transcript"] = "\n\n".join(results)
                 else:
                     task["transcript"] = "\n\n".join(results)
 
             # -- 4. Speaker diarization (optional) -----------------------
             if enable_diarization:
-                task["status"] = "diarizing"
+                _start_stage(task, "diarizing", "开始说话人分离")
                 try:
                     chunk_speaker_results = []
                     for idx, (chunk_path, text) in enumerate(zip(chunk_paths_kept, results)):
@@ -233,7 +280,7 @@ class TranscriptionService:
                         for new_label, display in display_names.items():
                             # Skip if this name is shared by multiple speakers
                             if len(used_display_names.get(display, [])) > 1:
-                                print(f"⚠️ [Dedup] Display name '{display}' used by multiple speakers, keeping generic labels")
+                                _log_event(task, "diarizing", f"显示名 '{display}' 被多个说话人使用，保留通用标签")
                                 continue
                             # Replace all original labels with the display name
                             for orig_label in original_labels_map.get(new_label, set()):
@@ -268,12 +315,21 @@ class TranscriptionService:
             error_chunks = [c for c in task["chunk_results"] if c["status"] == "error"]
             all_failed = len(error_chunks) == len(task["chunk_results"]) and len(task["chunk_results"]) > 0
 
+            elapsed = round(time.monotonic() - pipeline_t0, 1)
+            task["elapsed_seconds"] = elapsed
+            task["completed_at"] = datetime.now(timezone.utc).isoformat()
+            total_chars = len(task.get("transcript", ""))
+
             if all_failed:
                 task["status"] = "error"
                 task["transcript"] = ""
                 task["error"] = f"全部 {len(error_chunks)} 个分段转写失败: {error_chunks[0]['text']}"
+                _log_event(task, "error", f"转写失败 ({elapsed}s)")
             else:
                 task["status"] = "done"
+                _log_event(task, "done",
+                           f"转写完成: {len(task['chunk_results'])}段, {total_chars}字, 耗时{elapsed}s",
+                           total_chars=total_chars)
 
             # ── Persist final result to DB (via TaskService) ──
             try:
@@ -289,11 +345,14 @@ class TranscriptionService:
                     duration_seconds=task.get("duration_seconds", 0.0),
                 )
             except Exception as e:
-                print(f"⚠️ Failed to persist completed task to DB: {e}")
+                _log_event(task, "persist", f"保存至数据库失败: {e}", error=True)
 
         except Exception:
             task["status"] = "error"
             task["error"] = traceback.format_exc()
+            task["completed_at"] = datetime.now(timezone.utc).isoformat()
+            task["elapsed_seconds"] = round(time.monotonic() - pipeline_t0, 1)
+            _log_event(task, "error", f"管道异常: {task['error'][:100]}")
         finally:
             try:
                 os.unlink(original_filepath)

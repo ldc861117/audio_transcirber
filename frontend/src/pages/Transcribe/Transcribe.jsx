@@ -3,6 +3,8 @@ import { useConfigStore, PROVIDER_DEFAULTS } from '../../stores/configStore';
 import TranscriptView from '../../components/Transcript/TranscriptView';
 import ExportPanel from '../../components/Transcript/ExportPanel';
 import Recorder from '../../components/Recorder/Recorder';
+import PipelineTimeline from '../../components/Progress/PipelineTimeline';
+import EventLog from '../../components/Progress/EventLog';
 import { api } from '../../api/endpoints';
 import {
   Upload,
@@ -14,7 +16,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Scissors,
-  FileText
+  FileText,
+  Clock
 } from 'lucide-react';
 
 const Transcribe = () => {
@@ -95,7 +98,9 @@ const Transcribe = () => {
 
   const getStatusIcon = () => {
     if (taskData.status === 'splitting') return <Scissors className="animate-pulse" size={20} />;
+    if (taskData.status === 'censusing') return <Mic className="animate-pulse" size={20} />;
     if (taskData.status === 'transcribing') return <FileText className="animate-pulse" size={20} />;
+    if (taskData.status === 'stitching') return <FileText className="animate-pulse" size={20} />;
     if (taskData.status === 'diarizing') return <Mic className="animate-pulse" size={20} />;
     return <Loader2 className="animate-spin" size={20} />;
   };
@@ -208,20 +213,42 @@ const Transcribe = () => {
       {/* Progress */}
       {isActive && (
         <div className="card" style={{ padding: '2rem', marginBottom: '1.5rem' }}>
+          {/* Pipeline Timeline */}
+          <PipelineTimeline
+            status={taskData.status}
+            pipelineLog={taskData.pipeline_log}
+            enableDiarization={taskData.enable_diarization}
+          />
+
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               {getStatusIcon()}
               <span style={{ fontWeight: 600 }}>
                 {taskData.status === 'splitting' ? '分割音频...' :
+                 taskData.status === 'censusing' ? '说话人普查...' :
                  taskData.status === 'transcribing' ? `转写中 ${taskData.current_chunk || 0}/${taskData.total_chunks || '?'}` :
+                 taskData.status === 'stitching' ? '拼接文本...' :
                  taskData.status === 'diarizing' ? '识别说话人...' : '处理中...'}
               </span>
             </div>
-            <span style={{ color: 'var(--accent-primary)', fontWeight: 700, fontSize: '1.1rem' }}>{progress}%</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              {taskData.elapsed_seconds > 0 && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  <Clock size={14} />
+                  {taskData.elapsed_seconds >= 60
+                    ? `${Math.floor(taskData.elapsed_seconds / 60)}m ${Math.round(taskData.elapsed_seconds % 60)}s`
+                    : `${Math.round(taskData.elapsed_seconds)}s`}
+                </span>
+              )}
+              <span style={{ color: 'var(--accent-primary)', fontWeight: 700, fontSize: '1.1rem' }}>{progress}%</span>
+            </div>
           </div>
           <div style={{ height: '8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '4px', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${progress}%`, backgroundColor: 'var(--accent-primary)', borderRadius: '4px', transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }} />
           </div>
+
+          {/* Event Log */}
+          <EventLog pipelineLog={taskData.pipeline_log} status={taskData.status} />
         </div>
       )}
 
@@ -251,10 +278,27 @@ const Transcribe = () => {
       {/* Transcript result */}
       {isDone && (
         <div className="card" style={{ padding: '2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', color: 'var(--success)' }}>
-            <CheckCircle2 size={24} />
-            <h3 style={{ margin: 0 }}>转写完成</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)' }}>
+              <CheckCircle2 size={24} />
+              <h3 style={{ margin: 0 }}>转写完成</h3>
+            </div>
+            {/* Completion summary */}
+            <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              {taskData.elapsed_seconds > 0 && (
+                <span>⏱ {taskData.elapsed_seconds >= 60
+                  ? `${Math.floor(taskData.elapsed_seconds / 60)}m ${Math.round(taskData.elapsed_seconds % 60)}s`
+                  : `${Math.round(taskData.elapsed_seconds)}s`}
+                </span>
+              )}
+              {taskData.total_chunks > 0 && <span>📄 {taskData.total_chunks}段</span>}
+              {taskData.transcript && <span>📝 {taskData.transcript.length}字</span>}
+            </div>
           </div>
+          {/* Show event log in completed state too */}
+          {taskData.pipeline_log && taskData.pipeline_log.length > 0 && (
+            <EventLog pipelineLog={taskData.pipeline_log} status={taskData.status} />
+          )}
           <TranscriptView
             taskId={taskId}
             transcript={taskData.transcript}

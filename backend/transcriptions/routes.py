@@ -100,7 +100,7 @@ def upload():
         "id": task_id,
         "filename": file.filename,
         "file_size_mb": round(file_size_mb, 2),
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "provider": provider,
         "enable_diarization": enable_diarization,
         "status": "queued",
@@ -146,7 +146,9 @@ def status(task_id):
     user_tasks = tasks.get(uid, {})
     task = user_tasks.get(task_id)
     if task:
-        return jsonify({"data": task})
+        # Strip internal fields before sending to client
+        response = {k: v for k, v in task.items() if not k.startswith('_')}
+        return jsonify({"data": response})
 
     # Also try user_id=0 (unauthenticated / mock auth)
     if uid != 0:
@@ -172,6 +174,26 @@ def status(task_id):
             current_app.logger.error(f"Error fetching task from DB: {e}")
 
     return make_error_response("NOT_FOUND", "任务不存在", 404)
+
+
+@transcription_bp.route("/<task_id>/log", methods=["GET"])
+@jwt_required
+def get_log(task_id):
+    """Return just the pipeline_log for a task (lightweight polling)."""
+    uid = _get_uid()
+    user_tasks = tasks.get(uid, {})
+    task = user_tasks.get(task_id)
+    if not task and uid != 0:
+        task = tasks.get(0, {}).get(task_id)
+    if not task:
+        return make_error_response("NOT_FOUND", "任务不存在", 404)
+    return jsonify({
+        "data": {
+            "pipeline_log": task.get("pipeline_log", []),
+            "status": task.get("status"),
+            "elapsed_seconds": task.get("elapsed_seconds", 0),
+        }
+    })
 
 @transcription_bp.route("/", methods=["GET"])
 @jwt_required

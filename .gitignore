@@ -42,3 +42,4 @@ data/
 docs_local/
 AGENTS.md
 start.sh
+.github/workflows/
