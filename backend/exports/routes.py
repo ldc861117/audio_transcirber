@@ -12,19 +12,57 @@ except ImportError:
 export_bp = Blueprint("export", __name__)
 export_service = ExportService()
 
+
+def _get_export_uid():
+    """Get user ID for export, same logic as transcription routes."""
+    cu = getattr(g, 'current_user', None)
+    return cu.id if cu else getattr(g, 'user_id', 0)
+
+
 @export_bp.route("/<task_id>", methods=["GET", "POST"])
 @jwt_required
 def export_task(task_id):
-    uid = getattr(g, 'user_id', 0)
+    uid = _get_export_uid()
     
-    # GET: pull data from DB; POST: use provided data
+    # GET: pull data from in-memory tasks or legacy DB
     if request.method == "GET":
-        # from services.task_service import TaskService
-        # task_data = TaskService.get_task(task_id, uid)
-        task_data = None # Mock for now
+        task_data = None
+        
+        # Try in-memory tasks first (V2 backend)
+        try:
+            from backend.transcriptions.service import tasks as inmem_tasks
+            user_tasks = inmem_tasks.get(uid, {})
+            t = user_tasks.get(task_id)
+            if t and t.get("transcript"):
+                task_data = t
+        except Exception:
+            pass
+        
+        # Fallback: check legacy DB
+        if not task_data:
+            try:
+                from services.task_service import TaskService
+                # Try with current uid
+                legacy = TaskService.get_task(task_id, uid)
+                if not legacy:
+                    # Try with legacy uid
+                    cu = getattr(g, 'current_user', None)
+                    if cu:
+                        import sqlite3, os
+                        legacy_db = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'users.db')
+                        if os.path.exists(legacy_db):
+                            conn = sqlite3.connect(legacy_db)
+                            row = conn.execute("SELECT id FROM users WHERE username=?", (cu.username,)).fetchone()
+                            conn.close()
+                            if row:
+                                legacy = TaskService.get_task(task_id, row[0])
+                if legacy:
+                    task_data = legacy
+            except Exception:
+                pass
         
         if not task_data:
-            return jsonify({"error": {"code": "NOT_FOUND", "message": "\u4efb\u52a1\u4e0d\u5b58\u5728"}}), 404
+            return jsonify({"error": {"code": "NOT_FOUND", "message": "任务不存在"}}), 404
             
         fmt = request.args.get("format", "txt").lower()
         transcript = task_data.get("transcript", "")

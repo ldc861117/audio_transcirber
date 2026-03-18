@@ -1,8 +1,14 @@
 import os
 from datetime import timedelta
 
+# Project root = parent of backend/
+_basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 class BaseConfig:
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///data/app.db')
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        'DATABASE_URL',
+        f'sqlite:///{os.path.join(_basedir, "data", "app.db")}'
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'dev-secret-change-me')
     JWT_REFRESH_SECRET_KEY = os.environ.get('JWT_REFRESH_SECRET_KEY', 'dev-refresh-secret')

@@ -33,7 +33,7 @@ const TranscriptView = ({ taskId, transcript, speakers = [], enableDiarization =
 
   useEffect(() => {
     if (enableDiarization) {
-      api.speakers.list().then(res => setLibraryProfiles(res.data)).catch(console.error);
+      api.speakers.list().then(res => setLibraryProfiles(res.data.profiles || [])).catch(console.error);
     }
   }, [enableDiarization]);
 
@@ -200,7 +200,7 @@ const TranscriptView = ({ taskId, transcript, speakers = [], enableDiarization =
                             setIsSaving(true);
                             try {
                               const res = await api.speakers.updateTaskSpeakers(taskId, [editingSpeaker]);
-                              if (onUpdate) onUpdate(res.data);
+                              if (onUpdate) onUpdate(res.data?.data || res.data);
                               setEditingSpeaker(null);
                             } catch (err) {
                               alert('更新失败: ' + (err.response?.data?.error || err.message));
@@ -219,10 +219,10 @@ const TranscriptView = ({ taskId, transcript, speakers = [], enableDiarization =
                             setIsSaving(true);
                             try {
                               const res = await api.speakers.updateTaskSpeakers(taskId, [editingSpeaker], true);
-                              if (onUpdate) onUpdate(res.data);
+                              if (onUpdate) onUpdate(res.data?.data || res.data);
                               // Refresh library
                               const libRes = await api.speakers.list();
-                              setLibraryProfiles(libRes.data);
+                              setLibraryProfiles(libRes.data.profiles || []);
                               setEditingSpeaker(null);
                             } catch (err) {
                               alert('入库失败: ' + (err.response?.data?.error || err.message));

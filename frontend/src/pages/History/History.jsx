@@ -71,8 +71,9 @@ const History = () => {
       for (const task of activeTasks) {
         try {
           const res = await api.transcriptions.status(task.id);
-          updates[task.id] = res.data;
-          if (res.data.status === 'done' || res.data.status === 'error') {
+          const taskData = res.data.data || res.data;  // API wraps in {data: {...}}
+          updates[task.id] = taskData;
+          if (taskData.status === 'done' || taskData.status === 'error') {
             anyFinished = true;
           }
         } catch (err) {
@@ -103,7 +104,7 @@ const History = () => {
   useEffect(() => {
     if (expandedId && !expandedData) {
       api.transcriptions.status(expandedId)
-        .then(res => setExpandedData(res.data))
+        .then(res => setExpandedData(res.data.data || res.data))
         .catch(() => setExpandedData(null));
     }
   }, [expandedId]);
@@ -118,7 +119,7 @@ const History = () => {
     setExpandedData(null);
     try {
       const res = await api.transcriptions.status(taskId);
-      setExpandedData(res.data);
+      setExpandedData(res.data.data || res.data);
     } catch (err) {
       setExpandedData({ error: '无法加载详情' });
     }
@@ -357,11 +358,13 @@ const History = () => {
                   ) : expandedData ? (
                     <>
                       <TranscriptView
+                        taskId={task.id}
                         transcript={expandedData.transcript}
                         speakers={expandedData.speakers || []}
                         enableDiarization={expandedData.enable_diarization}
+                        onUpdate={(updatedData) => setExpandedData(prev => ({ ...prev, ...updatedData }))}
                       />
-                      <ExportPanel taskId={task.id} />
+                      <ExportPanel taskId={task.id} filename={task.filename} />
                     </>
                   ) : (
                     <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>加载中...</div>

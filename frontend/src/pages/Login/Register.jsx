@@ -20,7 +20,7 @@ const Register = () => {
       await register({ username, email, password });
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.error?.message || '注册失败');
+      setError(err.response?.data?.error || '注册失败');
     } finally {
       setIsLoading(false);
     }

@@ -52,7 +52,7 @@ SAMPLE_RATE = 16000       # Required sample rate for the model
 EMBEDDING_DIM = 256       # Output dimension of ResNet34-LM
 MIN_CLIP_DURATION = 1.0   # Minimum clip duration in seconds
 MAX_CLIPS_PER_SPEAKER = 3 # Max typical clips to store per speaker
-MATCH_THRESHOLD = 0.70    # Cosine similarity threshold for speaker match
+MATCH_THRESHOLD = 0.82    # Cosine similarity threshold for speaker match (raised from 0.70 to reduce false positives)
 
 
 # ── Data Classes ───────────────────────────────────────────────
@@ -259,14 +259,61 @@ def parse_diarization_response(response_text: str) -> list[SpeakerSegment]:
     Parse Gemini's structured diarization response.
     Expected format: JSON array of segments with speaker, start, end, text.
     Falls back to regex-based parsing if JSON extraction fails.
+    Applies auto-split heuristic if only one speaker is detected.
     """
     # Try to extract JSON from the response
     segments = _try_parse_json(response_text)
     if segments:
-        return segments
+        return _auto_split_single_speaker(segments)
 
     # Fallback: parse text-level speaker labels with approximate timestamps
-    return _parse_text_speakers(response_text)
+    fallback = _parse_text_speakers(response_text)
+    return _auto_split_single_speaker(fallback)
+
+
+def _auto_split_single_speaker(segments: list[SpeakerSegment]) -> list[SpeakerSegment]:
+    """
+    If all segments share the same speaker label but the text shows a clear
+    Q&A / dialogue pattern, automatically split into two speakers.
+    This is a safety net for when Gemini fails to distinguish speakers.
+    """
+    if not segments or len(segments) < 2:
+        return segments
+
+    unique_labels = set(s.speaker_label for s in segments)
+    if len(unique_labels) > 1:
+        return segments  # Already has multiple speakers, do nothing
+
+    # Detect question-answer pattern
+    question_indices = []
+    for i, seg in enumerate(segments):
+        text = seg.text.strip()
+        # Short text ending with "？" or containing interrogative words
+        is_question = (
+            text.endswith('？') or text.endswith('?')
+            or (len(text) < 50 and any(q in text for q in ['吗', '呢', '什么', '怎么', '哪', '谁', '几', '多少', '是否', '为何', '如何']))
+        )
+        if is_question:
+            question_indices.append(i)
+
+    # Need at least 2 questions to consider this a dialogue
+    if len(question_indices) < 2:
+        return segments
+
+    print(f"🔀 [Auto-split] Detected {len(question_indices)} questions in {len(segments)} single-speaker segments. Splitting into 2 speakers.")
+
+    original_label = segments[0].speaker_label
+    speaker_a = f"{original_label}-提问者"
+    speaker_b = f"{original_label}-回答者"
+
+    # Simple heuristic: questions → Speaker A, everything else → Speaker B
+    for i, seg in enumerate(segments):
+        if i in question_indices:
+            seg.speaker_label = speaker_a
+        else:
+            seg.speaker_label = speaker_b
+
+    return segments
 
 
 def _try_parse_json(text: str) -> list[SpeakerSegment]:
@@ -634,6 +681,29 @@ class SpeakerService:
                     print(f"Warning: Speaker matching failed for {label}: {e}")
 
             results.append(result)
+
+        # ── Enforce exclusive 1:1 matching ──────────────────────────
+        # If two speakers match the same profile, only the one with
+        # higher similarity keeps the match. This prevents both being
+        # labeled with the same name (e.g. both → "杨滨").
+        profile_claims: dict[int, list[int]] = {}  # profile_id → [result indices]
+        for idx, r in enumerate(results):
+            if r.matched_profile_id is not None:
+                profile_claims.setdefault(r.matched_profile_id, []).append(idx)
+
+        for profile_id, claimers in profile_claims.items():
+            if len(claimers) <= 1:
+                continue
+            # Keep only the best match; clear the rest
+            best_idx = max(claimers, key=lambda i: results[i].match_similarity)
+            for idx in claimers:
+                if idx != best_idx:
+                    print(f"🚫 [Exclusive Match] Speaker '{results[idx].label}' also matched "
+                          f"profile '{results[idx].matched_name}' (sim={results[idx].match_similarity:.4f}) "
+                          f"but speaker '{results[best_idx].label}' has higher sim={results[best_idx].match_similarity:.4f}. Clearing.")
+                    results[idx].matched_profile_id = None
+                    results[idx].matched_name = None
+                    results[idx].match_similarity = 0.0
 
         return results
 

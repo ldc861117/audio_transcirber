@@ -6,6 +6,7 @@ Provides SQLite-backed user storage and Flask-Login integration.
 import os
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
 from flask_login import LoginManager, UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -105,9 +106,31 @@ def load_user(user_id: str) -> User | None:
         return None
 
 
+def _persistent_secret_key() -> str:
+    """Return a stable secret key, persisted to disk so sessions/JWTs survive restarts."""
+    env_key = os.environ.get("SECRET_KEY")
+    if env_key:
+        return env_key
+    key_file = Path(get_data_dir()) / ".secret_key"
+    if key_file.exists():
+        return key_file.read_text().strip()
+    key = os.urandom(32).hex()
+    key_file.write_text(key)
+    return key
+
+
+def get_or_create_local_user() -> "User":
+    """Get or create the default 'local' user for desktop mode (no manual login needed)."""
+    with _get_db() as conn:
+        row = conn.execute("SELECT id, username FROM users WHERE username = ?", ("local",)).fetchone()
+    if row:
+        return User(row["id"], row["username"])
+    return User.create("local", os.urandom(16).hex())
+
+
 def setup_auth(app) -> None:
     """Initialize auth: create DB tables and attach Flask-Login to the app."""
-    app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32).hex())
+    app.secret_key = _persistent_secret_key()
     login_manager.init_app(app)
     init_db()
 

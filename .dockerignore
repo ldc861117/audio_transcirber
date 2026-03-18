@@ -1,0 +1,49 @@
+# ── Python cache ──
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.pytest_cache/
+backend/tests/
+
+# ── Environment / Secrets ──
+.env
+.env.*
+!.env.example
+
+# ── Node modules (npm ci will reinstall) ──
+frontend/node_modules/
+node_modules/
+
+# ── Build artifacts ──
+build/
+dist/
+frontend/dist/
+
+# ── Audio / Media ──
+demo_audio/
+uploads/
+audio_transcriber_uploads/
+
+# ── Data / Database ──
+data/
+
+# ── Docs / Logs ──
+docs_local/
+*.log
+
+# ── macOS ──
+.DS_Store
+
+# ── IDE / Agent ──
+.agents/
+.gemini/
+.vscode/
+.idea/
+*.spec
+*.spec.bak
+
+# ── Git ──
+.git/
+.gitignore

@@ -33,8 +33,9 @@ const Transcribe = () => {
     pollRef.current = setInterval(async () => {
       try {
         const res = await api.transcriptions.status(id);
-        setTaskData(res.data);
-        if (res.data.status === 'done' || res.data.status === 'error') {
+        const task = res.data.data || res.data;  // API wraps in {data: {...}}
+        setTaskData(task);
+        if (task.status === 'done' || task.status === 'error') {
           clearInterval(pollRef.current);
           pollRef.current = null;
         }
@@ -75,12 +76,14 @@ const Transcribe = () => {
 
     try {
       const res = await api.transcriptions.upload(formData);
-      const id = res.data.task_id;
+      const uploadData = res.data.data || res.data;
+      const id = uploadData.task_id;
       setTaskId(id);
       setTaskData({ status: 'queued', filename: file.name });
       pollStatus(id);
     } catch (err) {
-      setError(err.response?.data?.error || '上传失败');
+      const errorData = err.response?.data?.error;
+      setError(typeof errorData === 'object' ? errorData.message : (errorData || '上传失败'));
     } finally {
       setUploading(false);
     }
@@ -259,7 +262,7 @@ const Transcribe = () => {
             enableDiarization={taskData.enable_diarization}
             onUpdate={(updatedData) => setTaskData(prev => ({ ...prev, ...updatedData }))}
           />
-          <ExportPanel taskId={taskId} />
+          <ExportPanel taskId={taskId} filename={taskData?.filename || file?.name} />
         </div>
       )}
     </div>
