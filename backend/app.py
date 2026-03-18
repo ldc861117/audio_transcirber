@@ -1,12 +1,21 @@
 import os
+import logging
 from flask import Flask, jsonify
 from backend.db.base import db, init_db
 from backend.extensions import init_extensions
 from backend.config import configs
+from backend.errors import register_error_handlers
 
 def create_app(config_name='development'):
     app = Flask(__name__)
     app.config.from_object(configs[config_name])
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    app.logger.setLevel(logging.INFO)
 
     # Init database
     init_db(app)
@@ -17,6 +26,9 @@ def create_app(config_name='development'):
     # Register blueprints
     try:
         from backend.auth.routes import auth_bp
+        from backend.auth.jwt_manager import validate_jwt_secrets
+        with app.app_context():
+            validate_jwt_secrets()
         app.register_blueprint(auth_bp, url_prefix='/api/v2/auth')
     except ImportError:
         app.logger.warning("Auth module not available, skipping...")
@@ -37,25 +49,7 @@ def create_app(config_name='development'):
     app.register_blueprint(export_bp, url_prefix='/api/v2/export')
 
     # Global error handlers
-    @app.errorhandler(400)
-    def bad_request(e):
-        return jsonify({"error": {"code": "BAD_REQUEST", "message": str(e.description if hasattr(e, 'description') else e)}}), 400
-
-    @app.errorhandler(401)
-    def unauthorized(e):
-        return jsonify({"error": {"code": "AUTH_REQUIRED", "message": "Authentication required"}}), 401
-
-    @app.errorhandler(403)
-    def forbidden(e):
-        return jsonify({"error": {"code": "FORBIDDEN", "message": "Access denied"}}), 403
-
-    @app.errorhandler(404)
-    def not_found(e):
-        return jsonify({"error": {"code": "NOT_FOUND", "message": "Resource not found"}}), 404
-
-    @app.errorhandler(500)
-    def internal_error(e):
-        return jsonify({"error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}}), 500
+    register_error_handlers(app)
 
     # Health check
     @app.route('/api/v2/health')

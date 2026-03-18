@@ -3,6 +3,7 @@ from flask_cors import CORS
 cors = CORS()
 
 def init_extensions(app):
-    # Desktop app (pywebview) sends requests from file:// or localhost origins
-    # Production Cloud Run needs to accept these cross-origin requests
-    cors.init_app(app, origins="*", supports_credentials=True)
+    # Tighten CORS to use origins from app.config['CORS_ORIGINS']
+    # Defaults to '*' if not configured (for desktop app compatibility)
+    origins = app.config.get('CORS_ORIGINS', '*')
+    cors.init_app(app, origins=origins, supports_credentials=True)

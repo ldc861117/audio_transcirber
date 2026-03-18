@@ -1,6 +1,9 @@
 import os
+import logging
 import traceback
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 from .audio_utils import split_audio
 from .gemini_provider import transcribe_chunk
 
@@ -251,7 +254,7 @@ class TranscriptionService:
                         task["speakers"] = []
 
                 except Exception as e:
-                    print(f"\u26a0\ufe0f Diarization failed: {e}")
+                    logger.warning(f"Diarization failed: {e}")
                     task["speakers"] = []
                     task["diarization_error"] = str(e)
                 finally:

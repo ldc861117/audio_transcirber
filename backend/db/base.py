@@ -16,6 +16,14 @@ def init_db(app):
         except ImportError:
             pass
         try:
+            from backend.tasks.models import Task  # noqa: F401
+        except ImportError:
+            pass
+        try:
+            from backend.speakers.db import SpeakerProfile, SpeakerClip  # noqa: F401
+        except ImportError:
+            pass
+        try:
             db.create_all()
         except Exception:
             pass  # Table already exists (race condition with multiple workers)

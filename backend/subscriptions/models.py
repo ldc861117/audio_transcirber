@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from ..db.base import db
 
 class Subscription(db.Model):
@@ -15,8 +15,8 @@ class Subscription(db.Model):
     current_period_end = db.Column(db.DateTime, nullable=True)
     monthly_minutes_limit = db.Column(db.Integer, default=60)
     minutes_used = db.Column(db.Float, default=0.0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 class QuotaUsage(db.Model):
     __tablename__ = 'quota_usage'
@@ -25,7 +25,7 @@ class QuotaUsage(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     task_id = db.Column(db.String(64), nullable=False)
     minutes_used = db.Column(db.Float, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 class Invoice(db.Model):
     __tablename__ = 'invoices'
@@ -37,4 +37,4 @@ class Invoice(db.Model):
     currency = db.Column(db.String(3), default='cny')
     status = db.Column(db.String(20))                 # paid | failed | refunded
     description = db.Column(db.String(500), default='')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

@@ -8,6 +8,7 @@ import pytest
 import json
 from backend.db.base import db
 from backend.auth.models import User
+from backend.auth.jwt_manager import create_access_token
 from backend.subscriptions.models import Subscription, QuotaUsage, Invoice
 from backend.subscriptions.plan_config import get_plan_config, is_tier_gte, get_all_plans
 from backend.subscriptions.quota_service import QuotaService
@@ -116,8 +117,8 @@ class TestQuotaService:
 
 class TestSubscriptionRoutes:
     """
-    Subscription routes use a local mock jwt_required that defaults user_id=1
-    when no Authorization header is present.
+    Subscription routes now use real jwt_required.
+    Tests must provide valid JWT auth headers.
     """
 
     @pytest.fixture(autouse=True)
@@ -128,6 +129,12 @@ class TestSubscriptionRoutes:
             db.session.add(u)
             db.session.commit()
 
+    def _auth_headers(self, app):
+        with app.app_context():
+            user = User.query.get(1)
+            token = create_access_token(user)
+        return {'Authorization': f'Bearer {token}'}
+
     def test_plans_public(self, client):
         resp = client.get('/api/v2/subscriptions/plans')
         assert resp.status_code == 200
@@ -135,8 +142,9 @@ class TestSubscriptionRoutes:
         assert 'pro' in data
         assert data['pro']['monthly_minutes'] == -1
 
-    def test_my_subscription_default_free(self, client):
-        resp = client.get('/api/v2/subscriptions/me')
+    def test_my_subscription_default_free(self, client, app):
+        headers = self._auth_headers(app)
+        resp = client.get('/api/v2/subscriptions/me', headers=headers)
         assert resp.status_code == 200
         data = resp.get_json()['data']
         assert data['tier'] == 'free'
@@ -145,13 +153,15 @@ class TestSubscriptionRoutes:
     def test_usage_route(self, client, app):
         with app.app_context():
             QuotaService.deduct_quota(1, 'task-r', 7.0)
-        resp = client.get('/api/v2/subscriptions/usage')
+        headers = self._auth_headers(app)
+        resp = client.get('/api/v2/subscriptions/usage', headers=headers)
         assert resp.status_code == 200
         data = resp.get_json()['data']
         assert data['total_used'] == 7.0
 
-    def test_invoices_empty(self, client):
-        resp = client.get('/api/v2/subscriptions/invoices')
+    def test_invoices_empty(self, client, app):
+        headers = self._auth_headers(app)
+        resp = client.get('/api/v2/subscriptions/invoices', headers=headers)
         assert resp.status_code == 200
         assert resp.get_json()['data'] == []
 

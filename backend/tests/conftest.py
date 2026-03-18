@@ -31,13 +31,8 @@ def app():
 def clean_db(app):
     """Reset DB before each test."""
     with app.app_context():
-        from sqlalchemy import text
-        for table in ['quota_usage', 'invoices', 'refresh_tokens', 'subscriptions', 'users']:
-            try:
-                _db.session.execute(text(f'DELETE FROM {table}'))
-            except Exception:
-                _db.session.rollback()
-        _db.session.commit()
+        _db.drop_all()
+        _db.create_all()
         yield
         _db.session.rollback()
 

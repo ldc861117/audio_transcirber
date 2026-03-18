@@ -1,9 +1,20 @@
 """
 User authentication module for Audio Transcriber.
 Provides SQLite-backed user storage and Flask-Login integration.
+
+DEPRECATION WARNING: This module is deprecated in favor of the V2 authentication
+system in `backend/auth/`. It is maintained for legacy (V1) support only.
 """
 
 import os
+import warnings
+
+warnings.warn(
+    "The root `auth.py` is deprecated and will be removed in a future version. "
+    "Please migrate to `backend.auth`.",
+    DeprecationWarning,
+    stacklevel=2
+)
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
