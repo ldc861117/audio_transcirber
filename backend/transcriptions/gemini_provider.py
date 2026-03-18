@@ -49,22 +49,33 @@ _USER_PROMPT_STANDARD = (
 )
 
 _USER_PROMPT_DIARIZATION = (
-    "\u8bf7\u5bf9\u4ee5\u4e0b\u97f3\u9891\u8fdb\u884c\u4e13\u4e1a\u8f6c\u5199\uff0c\u5e76\u8f93\u51fa\u7ed3\u6784\u5316 JSON \u683c\u5f0f\u4ee5\u652f\u6301\u8bf4\u8bdd\u4eba\u8bc6\u5222\u3002\n\n"
-    "**\u8f93\u51fa\u8981\u6c42**\uff1a\u4ec5\u8f93\u51fa\u4e00\u4e2a JSON \u5bf9\u8c61\uff0c\u4e0d\u8981\u5305\u542b\u4efb\u4f55\u5176\u4ed6\u6587\u5b57\uff1a\n"
-    '{\"segments\": [\n'
-    '  {\"speaker\": \"\u8bf4\u8bdd\u4eba1\", \"start\": 0.0, \"end\": 15.3, \"text\": \"\u8f6c\u5199\u5185\u5bb9...\"},\n'
-    '  {\"speaker\": \"\u8bf4\u8bdd\u4eba2\", \"start\": 15.3, \"end\": 28.7, \"text\": \"\u8f6c\u5199\u5185\u5bb9...\"}\n'
+    "请对以下音频进行专业且高精度的转写，并按说话人切分输出结构化 JSON。\n\n"
+    "**⚠️ 核心任务：精准识别不同的说话人 ⚠️**\n"
+    "这段音频通常包含两人或多人的对话（如访谈、会议、一问一答）。"
+    "你必须仔细辨别不同说话人的声音特征（男/女、音调、语速），**绝对不能把明显的对话内容错误地归为同一个说话人**。\n\n"
+    "**区分说话人的关键线索**：\n"
+    "1. 🎵 **音色与音调**：男女声音色的明显差异、嗓音特征。\n"
+    "2. 🗣️ **语速和节奏**：个人的说话习惯、语气词使用频率。\n"
+    "3. 💬 **对话逻辑**：一问一答、提问者 vs 回答者、赞同与反驳。\n"
+    "4. 🔄 **发言交替**：在明显的话题交锋或被打断时，必然是不同人在说话。\n\n"
+    "**输出格式**：仅输出一个纯净的 JSON 对象，不包含代码块标记或其他文字：\n"
+    '{"segments": [\n'
+    '  {"speaker": "说话人1", "start": 0.0, "end": 15.3, "text": "这是第一个人的发言..."},\n'
+    '  {"speaker": "说话人2", "start": 15.3, "end": 28.7, "text": "这是另一个人（比如被采访者）的回应..."},\n'
+    '  {"speaker": "说话人1", "start": 28.7, "end": 45.0, "text": "第一个人继续提问或补充..."}\n'
     ']}\n\n'
-    "**\u8f6c\u5199\u89c4\u8303**\uff1a\n"
-    "1. **\u8bf4\u8bdd\u4eba\u533a\u5206**\uff1a\u6839\u636e\u58f0\u7eb9\u548c\u4e0a\u4e0b\u6587\u533a\u5206\u4e0d\u540c\u8bf4\u8bdd\u4eba\uff0c\u4f7f\u7528 \"\u8bf4\u8bdd\u4eba1\"\u3001\"\u8bf4\u8bdd\u4eba2\" \u7b49\u6807\u8bb0\uff1b\n"
-    "2. **\u65f6\u95f4\u6233**\uff1astart \u548c end \u662f\u8be5\u6bb5\u53d1\u8a00\u5728\u97f3\u9891\u4e2d\u7684\u8fd1\u4f3c\u79d2\u6570\uff0c\u5c3d\u91cf\u51c6\u786e\uff1b\n"
-    "3. **\u667a\u80fd\u51c0\u5316**\uff1a\u5254\u9664\u53e3\u8bed\u5e9f\u8bdd\uff0c\u4fee\u6b63\u53e3\u8bef\u548c\u91cd\u590d\uff0c\u4fdd\u6301\u539f\u610f\uff1b\n"
-    "4. **\u4fdd\u6301\u5b8c\u6574**\uff1a\u4e0d\u8981\u9057\u6f0f\u4efb\u4f55\u5b9e\u8d28\u5185\u5bb9\uff1b\n"
-    "5. **\u7b80\u4f53\u4e2d\u6587**\uff1a\u59cb\u7ec8\u4f7f\u7528\u7b80\u4f53\u4e2d\u6587\u8f93\u51fa\u3002"
+    "**转写规范**：\n"
+    "1. **说话人切分**：只要说话人发生切换，必须新建一个 segment。\n"
+    "2. **时间戳**：提供该段发言的开始和结束秒数（尽可能准确）。\n"
+    "3. **智能净化**：剔除无意义的口语废话（嗯、啊、那个），修正口误，保持原意。\n"
+    "4. **完整性**：绝不遗漏实质性内容，确保转写文本完整。\n"
+    "5. **统一语言**：使用简体中文输出。\n\n"
+    "**最高优先级强制要求**：仔细聆听，只要有两个人或以上在交替说话，**必须**使用不同的 speaker 标签（说话人1, 说话人2 等）将其区分开来！！！"
 )
 
 def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "openai",
-                     enable_diarization: bool = False) -> str:
+                     enable_diarization: bool = False,
+                     census_context: str = "") -> str:
     """Send a single audio chunk to the appropriate API and return text."""
     if provider == "zhipu" and ZhipuAI and isinstance(client, ZhipuAI) and ("asr" in model.lower() or model == "glm-asr-2512"):
         with open(chunk_path, "rb") as f:
@@ -85,6 +96,10 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
 
     user_prompt = _USER_PROMPT_DIARIZATION if enable_diarization else _USER_PROMPT_STANDARD
 
+    # Inject census context into diarization prompt (if available)
+    if enable_diarization and census_context:
+        user_prompt = user_prompt + census_context
+
     kwargs = {
         "model": model,
         "messages": [
@@ -97,7 +112,7 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
                 ],
             }
         ],
-        "max_tokens": 8192,
+        "max_tokens": 65536,
     }
 
     # Special: Zhipu Thinking parameter

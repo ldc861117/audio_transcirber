@@ -5,15 +5,15 @@ from services.speaker_service import SpeakerService
 from services.task_service import TaskService
 from speaker import CLIPS_DIR
 
-speaker_bp = Blueprint("speakers", __name__)
+speaker_bp = Blueprint("speakers", __name__, url_prefix="/api/speakers")
 
-@speaker_bp.route("/api/speakers", methods=["GET"])
+@speaker_bp.route("/", methods=["GET"])
 @login_required
 def list_speakers():
     profiles = SpeakerService.get_user_profiles(current_user.id)
-    return jsonify(profiles)
+    return jsonify({"profiles": profiles})
 
-@speaker_bp.route("/api/speakers/<int:profile_id>/name", methods=["POST"])
+@speaker_bp.route("/<int:profile_id>/name", methods=["POST"])
 @login_required
 def update_speaker_name(profile_id):
     data = request.json or {}
@@ -23,7 +23,7 @@ def update_speaker_name(profile_id):
         return jsonify({"error": error}), 400 if error else 404
     return jsonify({"ok": True, "name": name})
 
-@speaker_bp.route("/api/speakers/<int:profile_id>", methods=["DELETE"])
+@speaker_bp.route("/<int:profile_id>", methods=["DELETE"])
 @login_required
 def delete_speaker(profile_id):
     success, error = SpeakerService.delete_profile(profile_id, current_user.id)
@@ -31,7 +31,7 @@ def delete_speaker(profile_id):
         return jsonify({"error": error}), 404
     return jsonify({"ok": True})
 
-@speaker_bp.route("/api/speakers/merge", methods=["POST"])
+@speaker_bp.route("/merge", methods=["POST"])
 @login_required
 def merge_speakers():
     data = request.json or {}
@@ -44,7 +44,7 @@ def merge_speakers():
         return jsonify({"error": error}), 404
     return jsonify({"ok": True})
 
-@speaker_bp.route("/api/clips/<path:filename>", methods=["GET"])
+@speaker_bp.route("/clips/<path:filename>", methods=["GET"])
 @login_required
 def serve_clip_direct(filename):
     safe_name = Path(filename).name
@@ -53,7 +53,7 @@ def serve_clip_direct(filename):
         return jsonify({"error": "片段不存在"}), 404
     return send_from_directory(str(CLIPS_DIR), safe_name)
 
-@speaker_bp.route("/api/speakers/<int:profile_id>/clips/<path:filename>", methods=["GET"])
+@speaker_bp.route("/<int:profile_id>/clips/<path:filename>", methods=["GET"])
 @login_required
 def serve_speaker_clip(profile_id, filename):
     # Verification of ownership could be added here if needed,
@@ -71,7 +71,7 @@ def serve_speaker_clip(profile_id, filename):
         return jsonify({"error": "片段不存在"}), 404
     return send_from_directory(str(CLIPS_DIR), safe_name)
 
-@speaker_bp.route("/api/v1/transcriptions/<task_id>/speakers", methods=["POST"])
+@speaker_bp.route("/task/<task_id>/update", methods=["POST"])
 @login_required
 def update_task_speakers(task_id):
     """
@@ -97,7 +97,7 @@ def update_task_speakers(task_id):
     updated_task = TaskService.get_task(task_id, current_user.id)
     return jsonify(updated_task)
 
-@speaker_bp.route("/api/speakers/save", methods=["POST"])
+@speaker_bp.route("/save", methods=["POST"])
 @login_required
 def save_speakers_from_task():
     """Legacy endpoint for compatibility, can be merged into update_task_speakers."""

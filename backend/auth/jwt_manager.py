@@ -5,6 +5,19 @@ from datetime import datetime, timedelta, timezone
 from flask import current_app
 from .models import RefreshToken, User
 
+def validate_jwt_secrets():
+    """
+    启动校验：确保 JWT_SECRET_KEY 和 JWT_REFRESH_SECRET_KEY 已配置且非默认值。
+    """
+    secret = current_app.config.get('JWT_SECRET_KEY')
+    refresh_secret = current_app.config.get('JWT_REFRESH_SECRET_KEY')
+
+    if not secret or secret == 'dev-secret-change-me':
+        current_app.logger.warning("JWT_SECRET_KEY is not set or using default value. Please update for production.")
+
+    if not refresh_secret or refresh_secret == 'dev-refresh-secret':
+        current_app.logger.warning("JWT_REFRESH_SECRET_KEY is not set or using default value. Please update for production.")
+
 def create_access_token(user) -> str:
     """创建 15 分钟 access token，payload 含 sub, username, role, tier"""
     now = datetime.now(timezone.utc)

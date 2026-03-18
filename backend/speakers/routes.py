@@ -16,8 +16,11 @@ speaker_bp = Blueprint("speakers", __name__)
 @jwt_required
 def list_speakers():
     uid = getattr(g, 'user_id', 0)
+    cu = getattr(g, 'current_user', None)
+    if cu and hasattr(cu, 'id'):
+        uid = cu.id
     profiles = SpeakerService.get_user_profiles(uid)
-    return jsonify({"data": profiles})
+    return jsonify({"profiles": profiles})
 
 @speaker_bp.route("/<int:profile_id>/name", methods=["POST"])
 @jwt_required
@@ -52,6 +55,96 @@ def merge_speakers():
     if not success:
         return jsonify({"error": {"code": "NOT_FOUND", "message": error}}), 404
     return jsonify({"data": {"ok": True}})
+
+
+@speaker_bp.route("/task/<task_id>/update", methods=["POST"])
+@jwt_required
+def update_task_speakers(task_id):
+    """Update speaker names in an in-memory transcription task."""
+    uid = getattr(g, 'user_id', 0)
+    cu = getattr(g, 'current_user', None)
+    if cu:
+        uid = cu.id
+
+    data = request.json or {}
+    speakers = data.get("speakers", [])
+    save_to_library = data.get("save_to_library", False)
+
+    # Find the task - try in-memory first, but we must also read from DB
+    from services.task_service import TaskService
+    db_task = TaskService.get_task(task_id, uid)
+    
+    try:
+        from backend.transcriptions.service import tasks as inmem_tasks
+        user_tasks = inmem_tasks.get(uid, {})
+        inmem_task = user_tasks.get(task_id)
+    except Exception:
+        inmem_task = None
+
+    if not db_task and not inmem_task:
+        return jsonify({"error": {"code": "NOT_FOUND", "message": "任务不存在"}}), 404
+        
+    # Prefer in-memory if available and active, otherwise use db_task
+    # But since historical tasks are often only in DB, we must use db_task's current state as baseline if inmem doesn't have it
+    target_obj = inmem_task if inmem_task else db_task
+    
+    if target_obj is db_task:
+        # DB task returns a dict, let's make sure it's mutable
+        target_obj = dict(db_task)
+        import json
+        if isinstance(target_obj.get("speakers"), str):
+            try: target_obj["speakers"] = json.loads(target_obj["speakers"])
+            except: target_obj["speakers"] = []
+
+    # Build old→new name mapping from the speakers list
+    name_map = {}
+    for sp in speakers:
+        old_label = sp.get("label") or sp.get("original_label") or ""
+        new_name = sp.get("name", "").strip()
+        if old_label and new_name and old_label != new_name:
+            name_map[old_label] = new_name
+
+    # Apply name replacements in transcript text
+    transcript = target_obj.get("transcript", "")
+    if transcript and name_map:
+        import re
+        for old_name, new_name in name_map.items():
+            # Replace 【old_name】 with 【new_name】
+            transcript = transcript.replace(f"\u3010{old_name}\u3011", f"\u3010{new_name}\u3011")
+        
+        target_obj["transcript"] = transcript
+        if inmem_task: inmem_task["transcript"] = transcript
+
+    # Update the speakers list in the task
+    updated_speakers = target_obj.get("speakers", [])
+    if isinstance(updated_speakers, list):
+        for sp_data in speakers:
+            old_label = sp_data.get("label") or sp_data.get("original_label") or ""
+            new_name = sp_data.get("name", "").strip()
+            for existing in updated_speakers:
+                if isinstance(existing, dict) and existing.get("label") == old_label:
+                    existing["label"] = new_name
+                    existing["name"] = new_name
+                    if sp_data.get("matched_profile_id"):
+                        existing["matched_profile_id"] = sp_data.get("matched_profile_id")
+        target_obj["speakers"] = updated_speakers
+        if inmem_task: inmem_task["speakers"] = updated_speakers
+
+    # Persist the update to the SQLite DB
+    try:
+        TaskService.update_task(task_id, transcript=target_obj.get("transcript", ""), speakers=target_obj.get("speakers", []))
+    except Exception as e:
+        print(f"Failed to persist speaker rename to DB: {e}")
+
+    # Optionally save to speaker library
+    if save_to_library:
+        for sp in speakers:
+            new_name = sp.get("name", "").strip()
+            profile_id = sp.get("matched_profile_id")
+            if profile_id and new_name:
+                SpeakerService.update_name(profile_id, uid, new_name)
+
+    return jsonify({"data": {"ok": True, "transcript": target_obj.get("transcript", ""), "speakers": target_obj.get("speakers", [])}})
 
 @speaker_bp.route("/clips/<path:filename>", methods=["GET"])
 @jwt_required

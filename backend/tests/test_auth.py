@@ -1,177 +1,152 @@
+"""
+Track A — JWT Authentication Tests
+Uses shared conftest fixtures (app, client, clean_db, auth_headers).
+"""
 import pytest
-from flask import Flask
-from backend.db.base import db, init_db
-from backend.config import configs
-from backend.auth.models import User, RefreshToken
-from backend.auth.routes import auth_bp
-from backend.auth.jwt_manager import create_access_token
-import json
 
-# Define the mock model globally to avoid re-definition errors in SQLAlchemy MetaData
-class Subscription(db.Model):
-    __tablename__ = 'subscriptions'
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
-    tier = db.Column(db.String(20), default='free')
-    __table_args__ = {'extend_existing': True}
 
-@pytest.fixture
-def app():
-    app = Flask(__name__)
-    app.config.from_object(configs['development'])
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-    app.config['TESTING'] = True
-    app.config['JWT_SECRET_KEY'] = 'test-secret-key-at-least-32-chars-long'
-    app.config['JWT_REFRESH_SECRET_KEY'] = 'test-refresh-secret-key-at-least-32-chars-long'
-    
-    init_db(app)
-    # Ensure blueprint is only registered once if app fixture is used multiple times
-    if 'auth' not in app.blueprints:
-        app.register_blueprint(auth_bp, url_prefix='/api/v2/auth')
-    
-    return app
+class TestRegister:
+    def test_register_success(self, client):
+        resp = client.post('/api/v2/auth/register', json={
+            'username': 'newuser',
+            'email': 'new@example.com',
+            'password': 'Pass1234!'
+        })
+        assert resp.status_code == 201
+        data = resp.get_json()['data']
+        assert 'access_token' in data
+        assert 'refresh_token' in data
+        assert data['user']['username'] == 'newuser'
+        assert data['user']['email'] == 'new@example.com'
 
-@pytest.fixture
-def client(app):
-    return app.test_client()
+    def test_register_duplicate_username(self, client):
+        client.post('/api/v2/auth/register', json={
+            'username': 'dup', 'email': 'a@a.com', 'password': 'Pass1234!'
+        })
+        resp = client.post('/api/v2/auth/register', json={
+            'username': 'dup', 'email': 'b@b.com', 'password': 'Pass1234!'
+        })
+        assert resp.status_code == 409
+        assert resp.get_json()['error']['code'] == 'CONFLICT'
 
-@pytest.fixture(autouse=True)
-def setup_database(app):
-    with app.app_context():
-        db.create_all()
-        yield
-        db.session.remove()
-        db.drop_all()
+    def test_register_duplicate_email(self, client):
+        client.post('/api/v2/auth/register', json={
+            'username': 'user1', 'email': 'same@a.com', 'password': 'Pass1234!'
+        })
+        resp = client.post('/api/v2/auth/register', json={
+            'username': 'user2', 'email': 'same@a.com', 'password': 'Pass1234!'
+        })
+        assert resp.status_code == 409
 
-def test_register_success(client):
-    response = client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    assert response.status_code == 201
-    data = response.get_json()
-    assert 'access_token' in data['data']
-    assert 'refresh_token' in data['data']
-    assert data['data']['user']['username'] == 'testuser'
+    def test_register_missing_fields(self, client):
+        resp = client.post('/api/v2/auth/register', json={'username': 'x'})
+        assert resp.status_code == 400
 
-def test_register_duplicate_username(client):
-    client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    response = client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test2@example.com',
-        'password': 'password123'
-    })
-    assert response.status_code == 409
-    assert response.get_json()['error']['code'] == 'CONFLICT'
 
-def test_login_success(client):
-    client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    response = client.post('/api/v2/auth/login', json={
-        'username': 'testuser',
-        'password': 'password123'
-    })
-    assert response.status_code == 200
-    data = response.get_json()
-    assert 'access_token' in data['data']
+class TestLogin:
+    def test_login_success(self, client):
+        client.post('/api/v2/auth/register', json={
+            'username': 'loginuser', 'email': 'l@e.com', 'password': 'Pass1234!'
+        })
+        resp = client.post('/api/v2/auth/login', json={
+            'username': 'loginuser', 'password': 'Pass1234!'
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()['data']
+        assert 'access_token' in data
+        assert 'refresh_token' in data
 
-def test_login_invalid_credentials(client):
-    client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    response = client.post('/api/v2/auth/login', json={
-        'username': 'testuser',
-        'password': 'wrongpassword'
-    })
-    assert response.status_code == 401
+    def test_login_by_email(self, client):
+        client.post('/api/v2/auth/register', json={
+            'username': 'emaillogin', 'email': 'e@e.com', 'password': 'Pass1234!'
+        })
+        resp = client.post('/api/v2/auth/login', json={
+            'username': 'e@e.com', 'password': 'Pass1234!'
+        })
+        assert resp.status_code == 200
 
-def test_me_protected(client):
-    # Register and login to get token
-    client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    login_resp = client.post('/api/v2/auth/login', json={
-        'username': 'testuser',
-        'password': 'password123'
-    })
-    token = login_resp.get_json()['data']['access_token']
-    
-    # Test protected /me
-    response = client.get('/api/v2/auth/me', headers={
-        'Authorization': f'Bearer {token}'
-    })
-    assert response.status_code == 200
-    assert response.get_json()['data']['username'] == 'testuser'
+    def test_login_wrong_password(self, client):
+        client.post('/api/v2/auth/register', json={
+            'username': 'wrongpw', 'email': 'w@e.com', 'password': 'Pass1234!'
+        })
+        resp = client.post('/api/v2/auth/login', json={
+            'username': 'wrongpw', 'password': 'WrongPassword!'
+        })
+        assert resp.status_code == 401
 
-def test_me_unauthorized(client):
-    response = client.get('/api/v2/auth/me')
-    assert response.status_code == 401
+    def test_login_nonexistent(self, client):
+        resp = client.post('/api/v2/auth/login', json={
+            'username': 'ghost', 'password': 'nope'
+        })
+        assert resp.status_code == 401
 
-def test_refresh_token(client):
-    reg_resp = client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    refresh_token = reg_resp.get_json()['data']['refresh_token']
-    
-    response = client.post('/api/v2/auth/refresh', json={
-        'refresh_token': refresh_token
-    })
-    assert response.status_code == 200
-    assert 'access_token' in response.get_json()['data']
 
-def test_logout(client):
-    reg_resp = client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    refresh_token = reg_resp.get_json()['data']['refresh_token']
-    
-    # Logout
-    client.post('/api/v2/auth/logout', json={'refresh_token': refresh_token})
-    
-    # Try refresh again
-    response = client.post('/api/v2/auth/refresh', json={
-        'refresh_token': refresh_token
-    })
-    assert response.status_code == 401
+class TestProtectedRoutes:
+    def test_me_success(self, client, auth_headers):
+        resp = client.get('/api/v2/auth/me', headers=auth_headers['headers'])
+        assert resp.status_code == 200
+        assert resp.get_json()['data']['username'] == 'testuser'
 
-def test_change_password(client):
-    client.post('/api/v2/auth/register', json={
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'password': 'password123'
-    })
-    login_resp = client.post('/api/v2/auth/login', json={
-        'username': 'testuser',
-        'password': 'password123'
-    })
-    token = login_resp.get_json()['data']['access_token']
-    
-    response = client.post('/api/v2/auth/change-password', json={
-        'old_password': 'password123',
-        'new_password': 'newpassword456'
-    }, headers={'Authorization': f'Bearer {token}'})
-    
-    assert response.status_code == 200
-    
-    # Verify new password
-    login_resp = client.post('/api/v2/auth/login', json={
-        'username': 'testuser',
-        'password': 'newpassword456'
-    })
-    assert login_resp.status_code == 200
+    def test_me_no_token(self, client):
+        resp = client.get('/api/v2/auth/me')
+        assert resp.status_code == 401
+        assert resp.get_json()['error']['code'] == 'AUTH_REQUIRED'
+
+    def test_me_invalid_token(self, client):
+        resp = client.get('/api/v2/auth/me', headers={
+            'Authorization': 'Bearer invalid.token.here'
+        })
+        assert resp.status_code == 401
+        assert resp.get_json()['error']['code'] == 'TOKEN_INVALID'
+
+
+class TestTokenRefresh:
+    def test_refresh_success(self, client, auth_headers):
+        resp = client.post('/api/v2/auth/refresh', json={
+            'refresh_token': auth_headers['refresh_token']
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()['data']
+        assert 'access_token' in data
+        assert len(data['access_token']) > 10  # valid JWT
+
+    def test_refresh_invalid_token(self, client):
+        resp = client.post('/api/v2/auth/refresh', json={
+            'refresh_token': 'fake-refresh-token'
+        })
+        assert resp.status_code == 401
+
+
+class TestLogout:
+    def test_logout_invalidates_refresh(self, client, auth_headers):
+        # Logout
+        client.post('/api/v2/auth/logout', json={
+            'refresh_token': auth_headers['refresh_token']
+        })
+        # Refresh should now fail
+        resp = client.post('/api/v2/auth/refresh', json={
+            'refresh_token': auth_headers['refresh_token']
+        })
+        assert resp.status_code == 401
+
+
+class TestChangePassword:
+    def test_change_password_success(self, client, auth_headers):
+        resp = client.post('/api/v2/auth/change-password', json={
+            'old_password': 'Test1234!',
+            'new_password': 'NewPass5678!'
+        }, headers=auth_headers['headers'])
+        assert resp.status_code == 200
+
+        # Verify new password works
+        resp = client.post('/api/v2/auth/login', json={
+            'username': 'testuser', 'password': 'NewPass5678!'
+        })
+        assert resp.status_code == 200
+
+    def test_change_password_wrong_old(self, client, auth_headers):
+        resp = client.post('/api/v2/auth/change-password', json={
+            'old_password': 'WrongOld!',
+            'new_password': 'NewPass5678!'
+        }, headers=auth_headers['headers'])
+        assert resp.status_code == 400 or resp.status_code == 401

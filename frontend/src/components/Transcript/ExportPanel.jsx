@@ -9,7 +9,7 @@ const FORMATS = [
   { value: 'pdf', label: 'PDF', icon: <FileDown size={16} />, desc: 'PDF 文档' },
 ];
 
-const ExportPanel = ({ taskId }) => {
+const ExportPanel = ({ taskId, filename }) => {
   const [exporting, setExporting] = useState(null);
 
   if (!taskId) return null;
@@ -18,11 +18,27 @@ const ExportPanel = ({ taskId }) => {
     setExporting(format);
     try {
       const response = await api.exports.download(taskId, format);
+
+      // Try to get filename from Content-Disposition header
+      let downloadName = '';
+      const disposition = response.headers?.['content-disposition'];
+      if (disposition) {
+        const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+        if (match) downloadName = decodeURIComponent(match[1].replace(/"/g, ''));
+      }
+      // Fallback: use prop filename or taskId
+      if (!downloadName) {
+        const baseName = filename
+          ? filename.replace(/\.[^/.]+$/, '')  // strip original extension
+          : `transcription_${taskId.slice(0, 8)}`;
+        downloadName = `${baseName}.${format}`;
+      }
+
       const blob = new Blob([response.data]);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `transcription_${taskId}.${format}`;
+      a.download = downloadName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

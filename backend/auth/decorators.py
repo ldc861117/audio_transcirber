@@ -1,5 +1,6 @@
 from functools import wraps
 from flask import request, jsonify, g, current_app
+import os
 import jwt
 from .jwt_manager import verify_access_token
 from .models import User
@@ -12,6 +13,12 @@ def jwt_required(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Desktop mode bypass
+        if os.environ.get('DESKTOP_MODE') == 'true' and not request.headers.get('Authorization'):
+            from .desktop_adapter import DesktopAdapter
+            g.current_user = DesktopAdapter.get_default_user()
+            return f(*args, **kwargs)
+
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return jsonify({"error": {"code": "AUTH_REQUIRED", "message": "Authentication required"}}), 401

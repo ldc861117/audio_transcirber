@@ -1,69 +1,65 @@
 """
 Speaker profile database module for Audio Transcriber.
-Provides SQLite-backed storage for speaker voiceprint profiles and audio clips.
+Provides SQLAlchemy-backed storage for speaker voiceprint profiles and audio clips.
 """
 
-import json
-import sqlite3
 import numpy as np
-from contextlib import contextmanager
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
+from ..db.base import db
 from app_paths import get_data_dir
 
-# ── Database setup ─────────────────────────────────────────────
+# ── Setup ─────────────────────────────────────────────
 DB_DIR = get_data_dir()
-DB_DIR.mkdir(exist_ok=True)
-DB_PATH = DB_DIR / "speakers.db"
-
 CLIPS_DIR = DB_DIR / "speaker_clips"
-CLIPS_DIR.mkdir(exist_ok=True)
+CLIPS_DIR.mkdir(exist_ok=True, parents=True)
 
+# ── Models ─────────────────────────────────────────────
 
-@contextmanager
-def _get_db():
-    """Yield a connection to the speakers database."""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
+class SpeakerProfile(db.Model):
+    __tablename__ = 'speaker_profiles'
 
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False, default='')
+    embedding = db.Column(db.LargeBinary, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-def init_speaker_db() -> None:
-    """Create speaker tables if they do not exist."""
-    with _get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS speaker_profiles (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     INTEGER NOT NULL,
-                name        TEXT    NOT NULL DEFAULT '',
-                embedding   BLOB   NOT NULL,
-                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS speaker_clips (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                profile_id    INTEGER NOT NULL,
-                clip_filename TEXT    NOT NULL,
-                duration      REAL   NOT NULL DEFAULT 0.0,
-                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (profile_id) REFERENCES speaker_profiles(id) ON DELETE CASCADE
-            )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_profiles_user
-            ON speaker_profiles(user_id)
-        """)
-        conn.commit()
+    clips = db.relationship('SpeakerClip', backref='profile', cascade="all, delete-orphan")
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "embedding": _deserialize_embedding(self.embedding).tolist(),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+class SpeakerClip(db.Model):
+    __tablename__ = 'speaker_clips'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    profile_id = db.Column(db.Integer, db.ForeignKey('speaker_profiles.id', ondelete='CASCADE'), nullable=False)
+    clip_filename = db.Column(db.String(255), nullable=False)
+    duration = db.Column(db.Float, nullable=False, default=0.0)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "profile_id": self.profile_id,
+            "clip_filename": self.clip_filename,
+            "duration": self.duration,
+            "created_at": self.created_at.isoformat(),
+        }
 
 # ── Embedding serialization ────────────────────────────────────
 
 def _serialize_embedding(embedding: np.ndarray) -> bytes:
-    """Convert a numpy embedding vector to bytes for SQLite storage."""
+    """Convert a numpy embedding vector to bytes for database storage."""
     return embedding.astype(np.float32).tobytes()
 
 
@@ -76,118 +72,102 @@ def _deserialize_embedding(blob: bytes) -> np.ndarray:
 
 def create_profile(user_id: int, embedding: np.ndarray, name: str = "") -> int:
     """Create a new speaker profile. Returns the profile ID."""
-    with _get_db() as conn:
-        cursor = conn.execute(
-            "INSERT INTO speaker_profiles (user_id, name, embedding) VALUES (?, ?, ?)",
-            (user_id, name, _serialize_embedding(embedding)),
-        )
-        conn.commit()
-        return cursor.lastrowid
+    profile = SpeakerProfile(
+        user_id=user_id,
+        name=name,
+        embedding=_serialize_embedding(embedding)
+    )
+    db.session.add(profile)
+    db.session.commit()
+    return profile.id
 
 
-def get_profile(profile_id: int) -> Optional[dict]:
+def get_profile(profile_id: int) -> Optional[Dict[str, Any]]:
     """Get a single speaker profile by ID."""
-    with _get_db() as conn:
-        row = conn.execute(
-            "SELECT id, user_id, name, embedding, created_at, updated_at FROM speaker_profiles WHERE id = ?",
-            (profile_id,),
-        ).fetchone()
-    if not row:
+    profile = db.session.get(SpeakerProfile, profile_id)
+    if not profile:
         return None
-    return {
-        "id": row["id"],
-        "user_id": row["user_id"],
-        "name": row["name"],
-        "embedding": _deserialize_embedding(row["embedding"]),
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
+    # Use internal dict conversion if called from other python code expecting numpy
+    res = profile.to_dict()
+    res["embedding"] = np.array(res["embedding"], dtype=np.float32)
+    return res
 
 
-def get_profiles_for_user(user_id: int) -> list[dict]:
+def get_profiles_for_user(user_id: int) -> List[Dict[str, Any]]:
     """Get all speaker profiles for a given user."""
-    with _get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, user_id, name, embedding, created_at, updated_at "
-            "FROM speaker_profiles WHERE user_id = ? ORDER BY updated_at DESC",
-            (user_id,),
-        ).fetchall()
-    profiles = []
-    for row in rows:
-        profiles.append({
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "name": row["name"],
-            "embedding": _deserialize_embedding(row["embedding"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        })
-    return profiles
+    profiles = SpeakerProfile.query.filter_by(user_id=user_id).order_by(SpeakerProfile.updated_at.desc()).all()
+    res_list = []
+    for p in profiles:
+        d = p.to_dict()
+        d["embedding"] = np.array(d["embedding"], dtype=np.float32)
+        res_list.append(d)
+    return res_list
 
 
 def update_profile_name(profile_id: int, name: str) -> bool:
     """Update a speaker profile's name. Returns True if updated."""
-    with _get_db() as conn:
-        cursor = conn.execute(
-            "UPDATE speaker_profiles SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (name, profile_id),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+    profile = db.session.get(SpeakerProfile, profile_id)
+    if not profile:
+        return False
+    profile.name = name
+    db.session.commit()
+    return True
 
 
 def update_profile_embedding(profile_id: int, embedding: np.ndarray) -> bool:
     """Update a speaker profile's embedding (e.g. after averaging with new samples)."""
-    with _get_db() as conn:
-        cursor = conn.execute(
-            "UPDATE speaker_profiles SET embedding = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (_serialize_embedding(embedding), profile_id),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
+    profile = db.session.get(SpeakerProfile, profile_id)
+    if not profile:
+        return False
+    profile.embedding = _serialize_embedding(embedding)
+    db.session.commit()
+    return True
 
 
 def delete_profile(profile_id: int) -> bool:
     """Delete a speaker profile and its clips. Returns True if deleted."""
+    profile = db.session.get(SpeakerProfile, profile_id)
+    if not profile:
+        return False
+
     # Get clip files to remove from disk
-    clips = get_clips_for_profile(profile_id)
-    with _get_db() as conn:
-        conn.execute("DELETE FROM speaker_clips WHERE profile_id = ?", (profile_id,))
-        cursor = conn.execute("DELETE FROM speaker_profiles WHERE id = ?", (profile_id,))
-        conn.commit()
+    clips = SpeakerClip.query.filter_by(profile_id=profile_id).all()
+    clip_filenames = [c.clip_filename for c in clips]
+
+    db.session.delete(profile)
+    db.session.commit()
+
     # Clean up clip files
-    for clip in clips:
-        clip_path = CLIPS_DIR / clip["clip_filename"]
+    for filename in clip_filenames:
+        clip_path = CLIPS_DIR / filename
         if clip_path.exists():
             clip_path.unlink()
-    return cursor.rowcount > 0
+    return True
 
 
 def merge_profiles(keep_id: int, merge_id: int) -> bool:
     """Merge two profiles: move clips from merge_id to keep_id, average embeddings, delete merge_id."""
-    profile_keep = get_profile(keep_id)
-    profile_merge = get_profile(merge_id)
+    profile_keep = db.session.get(SpeakerProfile, keep_id)
+    profile_merge = db.session.get(SpeakerProfile, merge_id)
     if not profile_keep or not profile_merge:
         return False
 
     # Average embeddings
-    avg_embedding = (profile_keep["embedding"] + profile_merge["embedding"]) / 2.0
+    emb_keep = _deserialize_embedding(profile_keep.embedding)
+    emb_merge = _deserialize_embedding(profile_merge.embedding)
+
+    avg_embedding = (emb_keep + emb_merge) / 2.0
     avg_embedding = avg_embedding / np.linalg.norm(avg_embedding)  # Re-normalize
 
-    with _get_db() as conn:
-        # Move clips
-        conn.execute(
-            "UPDATE speaker_clips SET profile_id = ? WHERE profile_id = ?",
-            (keep_id, merge_id),
-        )
-        # Update embedding
-        conn.execute(
-            "UPDATE speaker_profiles SET embedding = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (_serialize_embedding(avg_embedding), keep_id),
-        )
-        # Delete merged profile
-        conn.execute("DELETE FROM speaker_profiles WHERE id = ?", (merge_id,))
-        conn.commit()
+    # Move clips
+    SpeakerClip.query.filter_by(profile_id=merge_id).update({"profile_id": keep_id})
+
+    # Update keep profile
+    profile_keep.embedding = _serialize_embedding(avg_embedding)
+
+    # Delete merged profile
+    db.session.delete(profile_merge)
+    db.session.commit()
     return True
 
 
@@ -195,44 +175,33 @@ def merge_profiles(keep_id: int, merge_id: int) -> bool:
 
 def add_clip(profile_id: int, clip_filename: str, duration: float) -> int:
     """Add a clip record. Returns the clip ID."""
-    with _get_db() as conn:
-        cursor = conn.execute(
-            "INSERT INTO speaker_clips (profile_id, clip_filename, duration) VALUES (?, ?, ?)",
-            (profile_id, clip_filename, duration),
-        )
-        conn.commit()
-        return cursor.lastrowid
+    clip = SpeakerClip(
+        profile_id=profile_id,
+        clip_filename=clip_filename,
+        duration=duration
+    )
+    db.session.add(clip)
+    db.session.commit()
+    return clip.id
 
 
-def get_clips_for_profile(profile_id: int) -> list[dict]:
+def get_clips_for_profile(profile_id: int) -> List[Dict[str, Any]]:
     """Get all clips for a speaker profile."""
-    with _get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, profile_id, clip_filename, duration, created_at "
-            "FROM speaker_clips WHERE profile_id = ? ORDER BY duration DESC",
-            (profile_id,),
-        ).fetchall()
-    return [
-        {
-            "id": row["id"],
-            "profile_id": row["profile_id"],
-            "clip_filename": row["clip_filename"],
-            "duration": row["duration"],
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
+    clips = SpeakerClip.query.filter_by(profile_id=profile_id).order_by(SpeakerClip.duration.desc()).all()
+    return [c.to_dict() for c in clips]
 
 
 def delete_clip(clip_id: int) -> bool:
     """Delete a clip record and its file."""
-    with _get_db() as conn:
-        row = conn.execute("SELECT clip_filename FROM speaker_clips WHERE id = ?", (clip_id,)).fetchone()
-        if not row:
-            return False
-        conn.execute("DELETE FROM speaker_clips WHERE id = ?", (clip_id,))
-        conn.commit()
-    clip_path = CLIPS_DIR / row["clip_filename"]
+    clip = db.session.get(SpeakerClip, clip_id)
+    if not clip:
+        return False
+
+    filename = clip.clip_filename
+    db.session.delete(clip)
+    db.session.commit()
+
+    clip_path = CLIPS_DIR / filename
     if clip_path.exists():
         clip_path.unlink()
     return True
@@ -240,28 +209,25 @@ def delete_clip(clip_id: int) -> bool:
 
 # ── Similarity search ─────────────────────────────────────────
 
-def find_matching_profiles(user_id: int, embedding: np.ndarray, threshold: float = 0.75) -> list[dict]:
+def find_matching_profiles(user_id: int, embedding: np.ndarray, threshold: float = 0.75) -> List[Dict[str, Any]]:
     """
     Find stored profiles that match a given embedding above the threshold.
     Returns list of {profile_id, name, similarity} sorted by similarity desc.
     """
-    profiles = get_profiles_for_user(user_id)
+    profiles = SpeakerProfile.query.filter_by(user_id=user_id).all()
     matches = []
     emb_norm = embedding / np.linalg.norm(embedding)
 
     for p in profiles:
-        stored_norm = p["embedding"] / np.linalg.norm(p["embedding"])
+        stored_emb = _deserialize_embedding(p.embedding)
+        stored_norm = stored_emb / np.linalg.norm(stored_emb)
         similarity = float(np.dot(emb_norm, stored_norm))
         if similarity >= threshold:
             matches.append({
-                "profile_id": p["id"],
-                "name": p["name"],
+                "profile_id": p.id,
+                "name": p.name,
                 "similarity": round(similarity, 4),
             })
 
     matches.sort(key=lambda x: x["similarity"], reverse=True)
     return matches
-
-
-# Initialize on import
-init_speaker_db()

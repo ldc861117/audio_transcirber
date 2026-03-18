@@ -16,8 +16,9 @@ SUPPORTED_EXTENSIONS = {
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-DEFAULT_MAX_CHUNK_MINUTES = 60       # minutes per chunk
-DEFAULT_MAX_CHUNK_MB      = 100      # MB per chunk
+DEFAULT_MAX_CHUNK_MINUTES = 30       # minutes per chunk
+DEFAULT_MAX_CHUNK_MB      = 50       # MB per chunk
+DEFAULT_OVERLAP_MINUTES   = 2        # overlap between adjacent chunks
 
 def _setup_ffmpeg():
     """Locate ffmpeg and ffprobe, set pydub paths explicitly."""
@@ -41,20 +42,29 @@ def _setup_ffmpeg():
 
 _setup_ffmpeg()
 
-def split_audio(filepath: str, max_minutes: int, max_mb: int, preferred_format: str = "mp3") -> list[str]:
+def split_audio(filepath: str, max_minutes: int, max_mb: int,
+                overlap_minutes: int = 2, preferred_format: str = "mp3") -> list[str]:
     """
-    Split an audio file by duration AND file-size constraints.
+    Split an audio file by duration AND file-size constraints,
+    with configurable overlap between adjacent chunks.
     Returns a list of temporary file paths for each chunk.
     """
     audio = AudioSegment.from_file(filepath)
     fmt = preferred_format if preferred_format in ["mp3", "m4a"] else "mp3"
 
     chunk_ms = max_minutes * 60 * 1000
+    overlap_ms = overlap_minutes * 60 * 1000
+    stride_ms = max(chunk_ms - overlap_ms, 60 * 1000)  # at least 1 min stride
     chunks_by_time: list[AudioSegment] = []
 
-    # First pass: split by time
-    for start in range(0, len(audio), chunk_ms):
-        chunks_by_time.append(audio[start:start + chunk_ms])
+    # First pass: split by time with overlap
+    pos = 0
+    while pos < len(audio):
+        end = min(pos + chunk_ms, len(audio))
+        chunks_by_time.append(audio[pos:end])
+        if end >= len(audio):
+            break
+        pos += stride_ms
 
     # Second pass: further split any chunk that exceeds max_mb
     final_chunks: list[AudioSegment] = []

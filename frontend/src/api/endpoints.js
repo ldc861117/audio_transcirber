@@ -1,25 +1,28 @@
-import client from "./client";
+import client, { cloudClient } from "./client";
 
 export const api = {
+  // ── Auth & Subscriptions → Cloud Run ──
   auth: {
-    register: (data) => client.post("/auth/register", data),
-    login: (data) => client.post("/auth/login", data),
-    refresh: (data) => client.post("/auth/refresh", data),
-    logout: () => client.post("/auth/logout"),
-    me: () => client.get("/auth/me"),
-    updateProfile: (data) => client.put("/auth/me", data),
-    changePassword: (data) => client.post("/auth/change-password", data),
+    register: (data) => cloudClient.post("/auth/register", data),
+    login: (data) => cloudClient.post("/auth/login", data),
+    refresh: (data) => cloudClient.post("/auth/refresh", data),
+    logout: () => cloudClient.post("/auth/logout"),
+    me: () => cloudClient.get("/auth/me"),
+    updateProfile: (data) => cloudClient.put("/auth/me", data),
+    changePassword: (data) => cloudClient.post("/auth/change-password", data),
   },
   subscriptions: {
-    plans: () => client.get("/subscriptions/plans"),
-    me: () => client.get("/subscriptions/me"),
-    checkout: (data) => client.post("/subscriptions/checkout", data),
-    cancel: () => client.post("/subscriptions/cancel"),
-    reactivate: () => client.post("/subscriptions/reactivate"),
-    usage: () => client.get("/subscriptions/usage"),
-    invoices: () => client.get("/subscriptions/invoices"),
-    portal: (data) => client.post("/subscriptions/portal", data),
+    plans: () => cloudClient.get("/subscriptions/plans"),
+    me: () => cloudClient.get("/subscriptions/me"),
+    checkout: (data) => cloudClient.post("/subscriptions/checkout", data),
+    cancel: () => cloudClient.post("/subscriptions/cancel"),
+    reactivate: () => cloudClient.post("/subscriptions/reactivate"),
+    usage: () => cloudClient.get("/subscriptions/usage"),
+    invoices: () => cloudClient.get("/subscriptions/invoices"),
+    portal: (data) => cloudClient.post("/subscriptions/portal", data),
   },
+
+  // ── Transcription & Data → Local Flask ──
   transcriptions: {
     upload: (formData) =>
       client.post("/transcriptions/upload", formData, {
@@ -40,6 +43,11 @@ export const api = {
     delete: (id) => client.delete(`/speakers/${id}`),
     merge: (keepId, mergeId) =>
       client.post("/speakers/merge", { keep_id: keepId, merge_id: mergeId }),
+    updateTaskSpeakers: (taskId, speakers, saveToLibrary = false) =>
+      client.post(`/speakers/task/${taskId}/update`, {
+        speakers,
+        save_to_library: saveToLibrary,
+      }),
   },
   exports: {
     download: (taskId, format) =>
@@ -47,5 +55,11 @@ export const api = {
         params: { format },
         responseType: "blob",
       }),
+  },
+  // Alias for Settings page compatibility
+  providers: {
+    list: () => client.get("/transcriptions/providers"),
+    testConnection: (data) =>
+      client.post("/transcriptions/test-connection", data),
   },
 };

@@ -259,15 +259,63 @@ def parse_diarization_response(response_text: str) -> list[SpeakerSegment]:
     """
     Parse Gemini's structured diarization response.
     Expected format: JSON array of segments with speaker, start, end, text.
-    Falls back to regex-based parsing if JSON extraction fails.
+    Falls back to truncated JSON repair, then regex-based parsing.
     """
-    # Try to extract JSON from the response
+    # Try to extract JSON from the response (includes truncation repair)
     segments = _try_parse_json(response_text)
     if segments:
         return segments
 
     # Fallback: parse text-level speaker labels with approximate timestamps
-    return _parse_text_speakers(response_text)
+    segments = _parse_text_speakers(response_text)
+    if segments:
+        return segments
+
+    # Ultimate fallback: if text looks like JSON, extract all "text" values
+    if _looks_like_json(response_text):
+        segments = _extract_text_from_json_string(response_text)
+        if segments:
+            print(f"[Diarize] Recovered {len(segments)} segments via regex text extraction from truncated JSON")
+            return segments
+
+    return []
+
+
+def _looks_like_json(text: str) -> bool:
+    """Check if text appears to be JSON (possibly truncated)."""
+    stripped = text.strip()
+    return (stripped.startswith('{') or stripped.startswith('[')) and '"text"' in stripped
+
+
+def _extract_text_from_json_string(text: str) -> list[SpeakerSegment]:
+    """
+    Ultimate fallback: regex-extract segment data from raw/truncated JSON string.
+    Extracts speaker, start, end, text fields from individual segment objects.
+    """
+    # Match individual segment objects even in truncated JSON
+    segment_pattern = re.compile(
+        r'"speaker"\s*:\s*"([^"]+)"'
+        r'.*?"start"\s*:\s*([\d.]+)'
+        r'.*?"end"\s*:\s*([\d.]+)'
+        r'.*?"text"\s*:\s*"((?:[^"\\]|\\.)*)"',
+        re.DOTALL
+    )
+    segments = []
+    for m in segment_pattern.finditer(text):
+        try:
+            # Unescape JSON string escapes
+            raw_text = m.group(4).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+            seg = SpeakerSegment(
+                speaker_label=m.group(1),
+                start_time=float(m.group(2)),
+                end_time=float(m.group(3)),
+                text=raw_text,
+            )
+            if seg.duration > 0:
+                segments.append(seg)
+        except (ValueError, IndexError):
+            continue
+    return segments
 
 
 def _try_parse_json(text: str) -> list[SpeakerSegment]:
@@ -313,7 +361,64 @@ def _try_parse_json(text: str) -> list[SpeakerSegment]:
             # Try next occurrence of opener
             start_idx = text.find(opener, start_idx + 1)
 
+    # Strategy 3: Try to repair truncated JSON
+    result = _try_repair_truncated_json(text)
+    if result:
+        print(f"[Diarize] Recovered {len(result)} segments from truncated JSON")
+        return result
+
     return []
+
+
+def _try_repair_truncated_json(text: str) -> list[SpeakerSegment]:
+    """
+    Attempt to recover segments from truncated JSON.
+    Finds the last complete segment object and closes the JSON structure.
+    """
+    # Find the start of JSON
+    json_start = -1
+    for i, ch in enumerate(text):
+        if ch in ('{', '['):
+            json_start = i
+            break
+    if json_start < 0:
+        return []
+
+    json_text = text[json_start:]
+
+    # Find the last complete segment: look for the last "}," or "}\n" pattern
+    # that indicates a fully-closed segment object
+    last_complete = -1
+    # Find all positions where a segment object closes
+    for m in re.finditer(r'\}\s*,', json_text):
+        last_complete = m.end() - 1  # position of the comma
+
+    if last_complete < 0:
+        # Try without trailing comma (maybe only one complete segment)
+        m = re.search(r'\}\s*\]', json_text)
+        if m:
+            # JSON might actually be complete or at least has one complete seg + closing
+            pass
+        return []
+
+    # Take everything up to (but not including) the trailing comma of the last complete segment
+    truncated = json_text[:last_complete]
+
+    # Try to close the JSON properly
+    # If it started with {"segments": [...
+    if '"segments"' in truncated:
+        repaired = truncated + ']}'
+    else:
+        repaired = truncated + ']'
+
+    result = _parse_json_data(repaired)
+    if result:
+        return result
+
+    # Also try just closing with }]}
+    repaired2 = truncated + '}]}'
+    result = _parse_json_data(repaired2)
+    return result if result else []
 
 
 def _parse_json_data(raw: str) -> list[SpeakerSegment]:

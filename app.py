@@ -20,6 +20,8 @@ import shutil
 import sqlite3 as _sqlite3
 from pydub import AudioSegment
 from openai import OpenAI
+import jwt as pyjwt
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
 # ── Ensure pydub can find ffmpeg/ffprobe even inside a PyInstaller .app ──
 # macOS .app bundles don't inherit shell PATH, so Homebrew binaries are invisible.
@@ -77,6 +79,48 @@ app = Flask(
 CORS(app, origins=["http://localhost:5099", "http://localhost:3000"])
 setup_auth(app)
 
+# ── JWT helpers (for V2 React frontend compatibility) ──────────
+_JWT_SECRET = os.environ.get("JWT_SECRET_KEY", app.secret_key or os.urandom(32).hex())
+_JWT_ACCESS_TTL = _td(hours=24)
+_JWT_REFRESH_TTL = _td(days=30)
+
+def _make_tokens(user):
+    """Issue JWT access + refresh tokens for the given User."""
+    now = _dt.now(_tz.utc)
+    access = pyjwt.encode(
+        {"sub": user.id, "username": user.username, "exp": now + _JWT_ACCESS_TTL, "type": "access"},
+        _JWT_SECRET, algorithm="HS256",
+    )
+    refresh = pyjwt.encode(
+        {"sub": user.id, "username": user.username, "exp": now + _JWT_REFRESH_TTL, "type": "refresh"},
+        _JWT_SECRET, algorithm="HS256",
+    )
+    return access, refresh
+
+def _decode_jwt(token, expected_type="access"):
+    """Decode and validate a JWT. Returns payload dict or None."""
+    try:
+        payload = pyjwt.decode(token, _JWT_SECRET, algorithms=["HS256"])
+        if payload.get("type") != expected_type:
+            return None
+        return payload
+    except pyjwt.PyJWTError:
+        return None
+
+@app.before_request
+def _jwt_auto_login():
+    """If the request has a valid Bearer token, auto-login the user for Flask-Login."""
+    if current_user.is_authenticated:
+        return
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return
+    payload = _decode_jwt(auth_header[7:])
+    if payload:
+        user = User.get_by_id(payload["sub"])
+        if user:
+            login_user(user)
+
 # ── Phase 1 Blueprints ────────────────────────────────────
 from routes.task_routes import task_bp
 from routes.plan_routes import plan_bp
@@ -86,10 +130,13 @@ from routes.speaker_routes import speaker_bp
 from services.task_service import TaskService
 
 app.register_blueprint(task_bp)
+app.register_blueprint(task_bp, url_prefix="/api/v2/transcriptions", name="tasks_v2")
 app.register_blueprint(plan_bp)
 app.register_blueprint(export_bp)
+app.register_blueprint(export_bp, url_prefix="/api/v2/export", name="export_v2")
 app.register_blueprint(recording_bp)
 app.register_blueprint(speaker_bp)
+app.register_blueprint(speaker_bp, url_prefix="/api/v2/speakers", name="speakers_v2")
 
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "audio_transcriber_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -107,8 +154,9 @@ SUPPORTED_EXTENSIONS = {
 tasks: dict[int, dict[str, dict]] = {}
 
 # ── defaults (overridable per-request) ──────────────────────────
-DEFAULT_MAX_CHUNK_MINUTES = 60       # minutes per chunk
-DEFAULT_MAX_CHUNK_MB      = 100      # MB per chunk
+DEFAULT_MAX_CHUNK_MINUTES = 30       # minutes per chunk
+DEFAULT_MAX_CHUNK_MB      = 50       # MB per chunk
+DEFAULT_OVERLAP_MINUTES   = 2        # overlap between adjacent chunks
 
 # Load optional defaults from environment (for Quick Start / Test Mode)
 DEFAULT_BASE_URL = os.environ.get("custom_openai_baseurl", "")
@@ -140,20 +188,29 @@ DEMO_AUDIO_DIR.mkdir(exist_ok=True)
 #  Utilities
 # ================================================================
 
-def split_audio(filepath: str, max_minutes: int, max_mb: int, preferred_format: str = "mp3") -> list[str]:
+def split_audio(filepath: str, max_minutes: int, max_mb: int,
+                overlap_minutes: int = 2, preferred_format: str = "mp3") -> list[str]:
     """
-    Split an audio file by duration AND file-size constraints.
+    Split an audio file by duration AND file-size constraints,
+    with configurable overlap between adjacent chunks.
     Returns a list of temporary file paths for each chunk.
     """
     audio = AudioSegment.from_file(filepath)
     fmt = preferred_format if preferred_format in ["mp3", "m4a"] else "mp3"
 
     chunk_ms = max_minutes * 60 * 1000
+    overlap_ms = overlap_minutes * 60 * 1000
+    stride_ms = max(chunk_ms - overlap_ms, 60 * 1000)  # at least 1 min stride
     chunks_by_time: list[AudioSegment] = []
 
-    # First pass: split by time
-    for start in range(0, len(audio), chunk_ms):
-        chunks_by_time.append(audio[start:start + chunk_ms])
+    # First pass: split by time with overlap
+    pos = 0
+    while pos < len(audio):
+        end = min(pos + chunk_ms, len(audio))
+        chunks_by_time.append(audio[pos:end])
+        if end >= len(audio):
+            break
+        pos += stride_ms
 
     # Second pass: further split any chunk that exceeds max_mb
     final_chunks: list[AudioSegment] = []
@@ -222,18 +279,29 @@ _USER_PROMPT_STANDARD = (
 )
 
 _USER_PROMPT_DIARIZATION = (
-    "\u8bf7\u5bf9\u4ee5\u4e0b\u97f3\u9891\u8fdb\u884c\u4e13\u4e1a\u8f6c\u5199\uff0c\u5e76\u8f93\u51fa\u7ed3\u6784\u5316 JSON \u683c\u5f0f\u4ee5\u652f\u6301\u8bf4\u8bdd\u4eba\u8bc6\u522b\u3002\n\n"
-    "**\u8f93\u51fa\u8981\u6c42**\uff1a\u4ec5\u8f93\u51fa\u4e00\u4e2a JSON \u5bf9\u8c61\uff0c\u4e0d\u8981\u5305\u542b\u4efb\u4f55\u5176\u4ed6\u6587\u5b57\uff1a\n"
+    "请对以下音频进行专业转写，并输出结构化 JSON 格式以支持说话人识别。\n\n"
+    "**⚠️ 说话人区分是最重要的任务 ⚠️**\n"
+    "这段音频很可能包含 2 人或更多说话人（如会议、访谈、对话等场景）。\n"
+    "你必须仔细辨别不同说话人，**绝对不能把所有内容标记为同一个说话人**。\n\n"
+    "**区分说话人的关键线索**：\n"
+    "- 🎵 音调高低（男/女、嗓音粗细差异）\n"
+    "- 🗣️ 语速和节奏（快/慢、有无停顿习惯）\n"
+    "- 💬 对话轮次（一问一答、提问者 vs 回答者）\n"
+    "- 📝 内容角色（提问/追问的通常是一个人，详细解释/回答的是另一个人）\n"
+    "- 🔄 话题切换时的语气变化\n\n"
+    "**输出要求**：仅输出一个 JSON 对象，不要包含任何其他文字：\n"
     '{\"segments\": [\n'
-    '  {\"speaker\": \"\u8bf4\u8bdd\u4eba1\", \"start\": 0.0, \"end\": 15.3, \"text\": \"\u8f6c\u5199\u5185\u5bb9...\"},\n'
-    '  {\"speaker\": \"\u8bf4\u8bdd\u4eba2\", \"start\": 15.3, \"end\": 28.7, \"text\": \"\u8f6c\u5199\u5185\u5bb9...\"}\n'
+    '  {\"speaker\": \"说话人1\", \"start\": 0.0, \"end\": 15.3, \"text\": \"转写内容...\"},\n'
+    '  {\"speaker\": \"说话人2\", \"start\": 15.3, \"end\": 28.7, \"text\": \"转写内容...\"},\n'
+    '  {\"speaker\": \"说话人1\", \"start\": 28.7, \"end\": 45.0, \"text\": \"转写内容...\"}\n'
     ']}\n\n'
-    "**\u8f6c\u5199\u89c4\u8303**\uff1a\n"
-    "1. **\u8bf4\u8bdd\u4eba\u533a\u5206**\uff1a\u6839\u636e\u58f0\u7eb9\u548c\u4e0a\u4e0b\u6587\u533a\u5206\u4e0d\u540c\u8bf4\u8bdd\u4eba\uff0c\u4f7f\u7528 \"\u8bf4\u8bdd\u4eba1\"\u3001\"\u8bf4\u8bdd\u4eba2\" \u7b49\u6807\u8bb0\uff1b\n"
-    "2. **\u65f6\u95f4\u6233**\uff1astart \u548c end \u662f\u8be5\u6bb5\u53d1\u8a00\u5728\u97f3\u9891\u4e2d\u7684\u8fd1\u4f3c\u79d2\u6570\uff0c\u5c3d\u91cf\u51c6\u786e\uff1b\n"
-    "3. **\u667a\u80fd\u51c0\u5316**\uff1a\u5254\u9664\u53e3\u8bed\u5e9f\u8bdd\uff0c\u4fee\u6b63\u53e3\u8bef\u548c\u91cd\u590d\uff0c\u4fdd\u6301\u539f\u610f\uff1b\n"
-    "4. **\u4fdd\u6301\u5b8c\u6574**\uff1a\u4e0d\u8981\u9057\u6f0f\u4efb\u4f55\u5b9e\u8d28\u5185\u5bb9\uff1b\n"
-    "5. **\u7b80\u4f53\u4e2d\u6587**\uff1a\u59cb\u7ec8\u4f7f\u7528\u7b80\u4f53\u4e2d\u6587\u8f93\u51fa\u3002"
+    "**转写规范**：\n"
+    "1. **说话人区分**：仔细聆听声音特征的细微差异，区分不同说话人。即使声音相似，也要根据对话轮次和内容角色来判断说话人切换；\n"
+    "2. **时间戳**：start 和 end 是该段发言在音频中的近似秒数，尽量准确；\n"
+    "3. **智能净化**：剔除口语废话，修正口误和重复，保持原意；\n"
+    "4. **保持完整**：不要遗漏任何实质内容；\n"
+    "5. **简体中文**：始终使用简体中文输出。\n\n"
+    "**特别提醒**：如果你听到有问答对话（一个人提问，另一个人回答），这一定是至少两个不同的说话人，请用不同的 speaker 标签标记。"
 )
 
 
@@ -271,7 +339,7 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
                 ],
             }
         ],
-        "max_tokens": 8192,
+        "max_tokens": 16384,
     }
 
     # Special: Zhipu Thinking parameter
@@ -279,21 +347,37 @@ def transcribe_chunk(chunk_path: str, client, model: str, provider: str = "opena
         kwargs["extra_body"] = {"thinking": True}
 
     response = client.chat.completions.create(**kwargs)
+
+    # Detect truncation: finish_reason == "length" means token limit was hit
+    finish_reason = getattr(response.choices[0], 'finish_reason', None)
+    if finish_reason == "length":
+        print(f"⚠️ [Transcribe] Response truncated by token limit (max_tokens=16384) for chunk: {chunk_path}")
+
     return response.choices[0].message.content.strip()
 
 
 def run_transcription(task_id: str, filepath: str,
                       base_url: str, api_key: str, model: str,
                       max_minutes: int, max_mb: int, provider: str = "openai",
-                      user_id: int = 0, enable_diarization: bool = False):
+                      user_id: int = 0, enable_diarization: bool = False,
+                      overlap_minutes: int = 2):
     """Background worker: split -> transcribe -> (optional) diarize -> merge."""
     task = tasks[user_id][task_id]
     original_filepath = filepath
     try:
+        # -- 0. Compute audio duration for quota ----------------------
+        try:
+            _audio_for_duration = AudioSegment.from_file(filepath)
+            audio_duration_minutes = len(_audio_for_duration) / 60000.0
+            del _audio_for_duration  # free memory
+        except Exception:
+            audio_duration_minutes = 0.0
+
         # -- 1. Split ------------------------------------------------
         task["status"] = "splitting"
         pref_fmt = "m4a" if provider == "zhipu" else "mp3"
-        chunks = split_audio(filepath, max_minutes, max_mb, preferred_format=pref_fmt)
+        chunks = split_audio(filepath, max_minutes, max_mb,
+                             overlap_minutes=overlap_minutes, preferred_format=pref_fmt)
         task["total_chunks"] = len(chunks)
         task["status"] = "transcribing"
 
@@ -348,10 +432,33 @@ def run_transcription(task_id: str, filepath: str,
                             f"\u3010{seg.speaker_label}\u3011{seg.text}"
                         )
                 else:
-                    all_segments_text.append(r)
+                    # Fallback: if response looks like JSON, don't store raw JSON
+                    stripped = r.strip()
+                    if (stripped.startswith('{') or stripped.startswith('[')) and '"text"' in stripped:
+                        import re as _re
+                        text_values = _re.findall(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', r)
+                        if text_values:
+                            for tv in text_values:
+                                tv_clean = tv.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                all_segments_text.append(tv_clean)
+                            print(f"⚠️ [Transcribe] Recovered {len(text_values)} text segments from raw JSON response")
+                        else:
+                            all_segments_text.append(r)
+                    else:
+                        all_segments_text.append(r)
             task["transcript"] = "\n\n".join(all_segments_text)
         else:
-            task["transcript"] = "\n\n".join(results)
+            # LLM-based stitching for overlapping chunks
+            if len(results) > 1 and overlap_minutes > 0:
+                task["status"] = "stitching"
+                try:
+                    from services.stitch_service import stitch_transcripts
+                    task["transcript"] = stitch_transcripts(results, client, model)
+                except Exception as stitch_err:
+                    print(f"⚠️ LLM stitching failed, falling back to join: {stitch_err}")
+                    task["transcript"] = "\n\n".join(results)
+            else:
+                task["transcript"] = "\n\n".join(results)
 
         # -- 4. Speaker diarization (optional) -----------------------
         if enable_diarization:
@@ -413,6 +520,14 @@ def run_transcription(task_id: str, filepath: str,
         else:
             task["status"] = "done"
 
+        # ── Deduct quota ──
+        if task["status"] == "done" and audio_duration_minutes > 0:
+            try:
+                from services.quota_service import QuotaService
+                QuotaService.deduct_quota(user_id, task_id, round(audio_duration_minutes, 2))
+            except Exception as q_err:
+                print(f"⚠️ Quota deduction failed: {q_err}")
+
         # ── Persist final result to SQLite ──
         try:
             TaskService.update_task(task_id,
@@ -451,14 +566,15 @@ def run_transcription(task_id: str, filepath: str,
 def login_page():
     if current_user.is_authenticated:
         return redirect("/")
-    return send_from_directory("static", "login.html")
+    # Serve React app — it handles its own /login route internally
+    return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/register")
 def register_page():
     if current_user.is_authenticated:
         return redirect("/")
-    return send_from_directory("static", "register.html")
+    return send_from_directory(app.static_folder, "index.html")
 
 
 @app.route("/api/auth/register", methods=["POST"])
@@ -515,6 +631,93 @@ def api_me():
     return jsonify({"username": current_user.username})
 
 
+# ── V2 Auth Endpoints (JWT for React frontend) ────────────────
+
+@app.route("/api/v2/auth/register", methods=["POST"])
+def v2_api_register():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    email = data.get("email", "").strip()  # accepted but not stored
+
+    if not username or not password:
+        return jsonify({"error": "请填写用户名和密码"}), 400
+    if len(username) < 2 or len(username) > 32:
+        return jsonify({"error": "用户名长度需在 2-32 个字符之间"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "密码长度至少 6 个字符"}), 400
+    if User.username_exists(username):
+        return jsonify({"error": "用户名已被注册"}), 409
+
+    try:
+        user = User.create(username, password)
+    except _sqlite3.IntegrityError:
+        return jsonify({"error": "用户名已被注册"}), 409
+
+    login_user(user, remember=True)
+    access, refresh = _make_tokens(user)
+    return jsonify({"data": {
+        "access_token": access,
+        "refresh_token": refresh,
+        "user": {"id": user.id, "username": user.username, "email": email},
+    }})
+
+
+@app.route("/api/v2/auth/login", methods=["POST"])
+def v2_api_login():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify({"error": "请填写用户名和密码"}), 400
+
+    user = User.authenticate(username, password)
+    if not user:
+        return jsonify({"error": "用户名或密码错误"}), 401
+
+    login_user(user, remember=True)
+    access, refresh = _make_tokens(user)
+    return jsonify({"data": {
+        "access_token": access,
+        "refresh_token": refresh,
+        "user": {"id": user.id, "username": user.username},
+    }})
+
+
+@app.route("/api/v2/auth/logout", methods=["POST"])
+def v2_api_logout():
+    logout_user()
+    return jsonify({"data": {"ok": True}})
+
+
+@app.route("/api/v2/auth/me")
+@login_required
+def v2_api_me():
+    return jsonify({"data": {
+        "id": current_user.id,
+        "username": current_user.username,
+    }})
+
+
+@app.route("/api/v2/auth/refresh", methods=["POST"])
+def v2_api_refresh():
+    data = request.json or {}
+    token = data.get("refresh_token", "")
+    payload = _decode_jwt(token, expected_type="refresh")
+    if not payload:
+        return jsonify({"error": "Invalid refresh token"}), 401
+    user = User.get_by_id(payload["sub"])
+    if not user:
+        return jsonify({"error": "User not found"}), 401
+    login_user(user, remember=True)
+    access, refresh = _make_tokens(user)
+    return jsonify({"data": {
+        "access_token": access,
+        "refresh_token": refresh,
+    }})
+
+
 # ================================================================
 #  App Routes
 # ================================================================
@@ -561,8 +764,9 @@ def upload():
     if not all([base_url, api_key, model]):
         return jsonify({"error": "\u8bf7\u586b\u5199 Base URL\u3001API Key \u548c Model\uff0c\u6216\u914d\u7f6e\u670d\u52a1\u7aef\u9ed8\u8ba4\u503c"}), 400
 
-    max_minutes = int(request.form.get("max_minutes", DEFAULT_MAX_CHUNK_MINUTES))
-    max_mb      = int(request.form.get("max_mb", DEFAULT_MAX_CHUNK_MB))
+    max_minutes     = int(request.form.get("max_minutes", DEFAULT_MAX_CHUNK_MINUTES))
+    max_mb          = int(request.form.get("max_mb", DEFAULT_MAX_CHUNK_MB))
+    overlap_minutes = int(request.form.get("overlap_minutes", DEFAULT_OVERLAP_MINUTES))
     enable_diarization = request.form.get("enable_diarization", "false").lower() == "true"
 
     # Save uploaded file
@@ -608,7 +812,8 @@ def upload():
     t = threading.Thread(
         target=run_transcription,
         args=(task_id, save_path, base_url, api_key, model,
-              max_minutes, max_mb, provider, uid, enable_diarization),
+              max_minutes, max_mb, provider, uid, enable_diarization,
+              overlap_minutes),
         daemon=True,
     )
     t.start()
@@ -636,11 +841,21 @@ def status(task_id):
 def test_connection():
     data = request.json or {}
     raw_key = data.get("api_key", "").strip()
-    use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
-    base_url = data.get("base_url", "").strip() or DEFAULT_BASE_URL
-    api_key  = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
-    model    = data.get("model", "").strip() or DEFAULT_MODEL
     provider = data.get("provider", "openai")
+
+    # Built-in provider: use hardcoded config + server-side API key
+    builtin = BUILTIN_PROVIDERS.get(provider)
+    if builtin:
+        base_url = builtin["base_url"]
+        model    = data.get("model", "").strip() or builtin["model"]
+        api_key  = _get_builtin_key(provider)
+        if not api_key:
+            return jsonify({"ok": False, "error": f"服务端未配置 {builtin['api_key_env']}"}), 400
+    else:
+        use_server_key = TEST_MODE and (not raw_key or raw_key == SERVER_ENV_SENTINEL)
+        base_url = data.get("base_url", "").strip() or DEFAULT_BASE_URL
+        api_key  = DEFAULT_API_KEY if use_server_key else (raw_key or DEFAULT_API_KEY)
+        model    = data.get("model", "").strip() or DEFAULT_MODEL
 
     if not all([base_url, api_key, model]):
         return jsonify({"ok": False, "error": "\u8bf7\u586b\u5199\u6240\u6709\u914d\u7f6e\u9879"}), 400
@@ -716,7 +931,67 @@ def serve_demo_file(filename):
 
 
 
+# ── V2 API Compatibility Layer ─────────────────────────────
+# The React frontend calls /api/v2/transcriptions/* but legacy app.py
+# serves /api/*. These aliases let both work with the same backend.
+
+@app.route("/api/v2/transcriptions/test-connection", methods=["POST"])
+@login_required
+def v2_test_connection():
+    return test_connection()
+
+@app.route("/api/v2/transcriptions/upload", methods=["POST"])
+@login_required
+def v2_upload():
+    return upload()
+
+@app.route("/api/v2/transcriptions/<task_id>")
+@login_required
+def v2_status(task_id):
+    return status(task_id)
+
+@app.route("/api/v2/transcriptions/", methods=["GET"])
+@login_required
+def v2_list_tasks():
+    """List tasks for V2 frontend — delegates to TaskService."""
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 15, type=int)
+    search = request.args.get("search", "")
+
+    result = TaskService.list_tasks(
+        current_user.id, page=page, per_page=per_page, search=search
+    )
+    db_items = result.get("items", []) if isinstance(result, dict) else []
+
+    # Merge in-memory active tasks (not yet persisted to DB)
+    user_tasks = tasks.get(current_user.id, {})
+    db_ids = {t["id"] for t in db_items}
+    active_only = [t for t in user_tasks.values() if t.get("id") not in db_ids]
+
+    all_items = active_only + db_items
+    total = result.get("total", len(all_items)) + len(active_only)
+
+    return jsonify({"items": all_items, "total": total})
+
+@app.route("/api/v2/transcriptions/<task_id>", methods=["DELETE"])
+@login_required
+def v2_delete_task(task_id):
+    TaskService.delete_task(task_id, current_user.id)
+    user_tasks = tasks.get(current_user.id, {})
+    user_tasks.pop(task_id, None)
+    return jsonify({"ok": True})
+
+@app.route("/api/v2/transcriptions/providers")
+@login_required
+def v2_providers():
+    return builtin_providers()
+
+@app.route("/api/v2/health")
+def v2_health():
+    return jsonify({"ok": True, "version": "legacy"})
+
 # ================================================================
+
 
 if __name__ == "__main__":
     import threading
@@ -724,6 +999,17 @@ if __name__ == "__main__":
 
     port = 5099
     url = f"http://localhost:{port}"
+
+    # ── Desktop mode: auto-login a default "local" user ──────────
+    from auth import get_or_create_local_user
+
+    _local_user = get_or_create_local_user()
+
+    @app.before_request
+    def _desktop_auto_login():
+        """In desktop mode, always ensure the local user is logged in."""
+        if not current_user.is_authenticated:
+            login_user(_local_user, remember=True)
 
     def _start_flask():
         """Run Flask in a background thread."""

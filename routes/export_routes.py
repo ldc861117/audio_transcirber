@@ -14,7 +14,12 @@ def export_task(task_id):
     if request.method == "GET":
         task_data = TaskService.get_task(task_id, current_user.id)
         if not task_data:
-            return jsonify({"error": "任务不存在"}), 404
+            # Fallback: try in-memory tasks (for live/active tasks not yet persisted)
+            import app as main_app
+            user_tasks = main_app.tasks.get(current_user.id, {})
+            task_data = user_tasks.get(task_id)
+            if not task_data:
+                return jsonify({"error": "任务不存在"}), 404
         fmt = request.args.get("format", "txt").lower()
         transcript = task_data.get("transcript", "")
         speakers = task_data.get("speakers", [])

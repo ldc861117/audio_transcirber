@@ -55,7 +55,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'matplotlib', 'PIL', 'Pillow', 'IPython', 'psutil',
+        'tkinter', 'test', 'unittest',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -93,7 +96,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Audio Transcriber.app',
-    icon=None,
+    icon='assets/AppIcon.icns',
     bundle_identifier='com.audiotranscriber.app',
     info_plist={
         'CFBundleShortVersionString': '1.0.0',
