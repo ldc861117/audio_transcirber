@@ -7,13 +7,14 @@
 }
 
 body {
-  font-family: 'Inter', 'Noto Sans SC', sans-serif;
+  font-family: var(--font-body);
   background-color: var(--bg-color);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ─── Buttons ─── */
 button {
   cursor: pointer;
   border: none;
@@ -25,6 +26,99 @@ button:active {
   transform: scale(0.98);
 }
 
+.btn-primary {
+  background: var(--accent-gradient);
+  color: white;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-family: var(--font-body);
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-ai-glow);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ─── Card ─── */
+.card {
+  background-color: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-card);
+}
+
+/* ─── Glass Effects ─── */
+.glass-panel {
+  background: var(--glass-panel);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.glass-card {
+  background: var(--glass-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--border-radius);
+}
+
+.glass-subtle {
+  background: var(--glass-subtle);
+}
+
+/* ─── Glow & Shadows ─── */
+.ai-glow {
+  box-shadow: var(--shadow-ai-glow);
+}
+
+/* ─── Typography ─── */
+.font-headline {
+  font-family: var(--font-headline);
+}
+
+/* ─── Badges ─── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.badge-primary {
+  background: rgba(160, 120, 255, 0.2);
+  color: var(--accent-primary);
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+}
+
+.badge-error {
+  background: rgba(255, 180, 171, 0.2);
+  color: var(--error);
+}
+
+/* ─── Interactions ─── */
 .hover-bright:hover {
   filter: brightness(1.2);
   color: var(--text-primary) !important;
@@ -35,34 +129,82 @@ button:active {
   color: var(--text-primary) !important;
 }
 
-.btn-primary {
-  background: var(--accent-gradient);
-  color: white;
-  padding: 10px 20px;
-  font-weight: 600;
+.press-effect {
+  transition: transform 0.1s;
 }
 
-.btn-primary:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
+.press-effect:active {
+  transform: scale(0.97);
 }
 
-.card {
-  background-color: var(--bg-secondary);
-  border-radius: var(--border-radius);
-  padding: 1.5rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-}
-
+/* ─── Inputs ─── */
 input, select, textarea {
   background-color: var(--bg-tertiary);
-  border: 1px solid #475569;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
   border-radius: 8px;
   padding: 8px 12px;
   outline: none;
+  font-family: var(--font-body);
+  transition: var(--transition);
 }
 
-input:focus {
+input:focus, select:focus, textarea:focus {
   border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(208, 188, 255, 0.15);
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ─── Animations ─── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ─── Material Symbols ─── */
+.material-symbols-rounded {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+.material-symbols-rounded.filled {
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
 }
