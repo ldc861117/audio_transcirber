@@ -1,6 +1,8 @@
 """
-Task model module for Audio Transcriber.
-Defines the TranscriptionRecord dataclass and related utilities.
+Task model for Audio Transcriber.
+Defines the TranscriptionRecord dataclass for DB ↔ API serialization.
+
+Consolidated from root models/task.py during Phase 3 cleanup.
 """
 
 from dataclasses import dataclass, asdict, field
@@ -43,7 +45,6 @@ class TranscriptionRecord:
         d = asdict(self)
         d["created_at"] = self.created_at.isoformat()
         d["updated_at"] = self.updated_at.isoformat()
-        # Parse speakers_json if it's not empty
         if self.speakers_json:
             try:
                 d["speakers"] = json.loads(self.speakers_json)

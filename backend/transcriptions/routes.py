@@ -72,7 +72,7 @@ def upload():
 
     # Persist task to DB
     try:
-        from services.task_service import TaskService
+        from backend.transcriptions.task_service import TaskService
         TaskService.create_task(
             task_id=task_id,
             user_id=uid,
@@ -112,7 +112,7 @@ def status(task_id):
 
     # Fallback to DB
     try:
-        from services.task_service import TaskService
+        from backend.transcriptions.task_service import TaskService
         db_task = TaskService.get_task(task_id, uid)
         if db_task:
             return success_response(db_task)
@@ -137,7 +137,7 @@ def list_tasks():
     db_items = []
     db_total = 0
     try:
-        from services.task_service import TaskService
+        from backend.transcriptions.task_service import TaskService
         result = TaskService.list_tasks(uid, page, per_page, search)
         db_items = result["items"]
         db_total = result["total"]
@@ -183,7 +183,7 @@ def delete_task(task_id):
 
     # Remove from DB
     try:
-        from services.task_service import TaskService
+        from backend.transcriptions.task_service import TaskService
         deleted = TaskService.delete_task(task_id, uid)
         if deleted:
             return success_response({"ok": True})
@@ -227,7 +227,7 @@ def update_speakers(task_id):
 
     # Persist to DB
     try:
-        from services.task_service import TaskService
+        from backend.transcriptions.task_service import TaskService
         TaskService.update_task_speakers(task_id, uid, speaker_updates)
     except Exception as e:
         logger.warning(f"[UpdateSpeakers] DB update failed: {e}")

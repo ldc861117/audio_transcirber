@@ -19,7 +19,7 @@ def export_task(task_id):
     if request.method == "GET":
         task_data = None
         try:
-            from services.task_service import TaskService
+            from backend.transcriptions.task_service import TaskService
             task_data = TaskService.get_task(task_id, uid)
         except Exception as e:
             logger.warning(f"[Export] DB get_task failed: {e}")

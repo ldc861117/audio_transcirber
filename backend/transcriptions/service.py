@@ -169,7 +169,7 @@ class TranscriptionService:
 
             # ── Persist final result to DB ──
             try:
-                from services.task_service import TaskService
+                from backend.transcriptions.task_service import TaskService
                 update_kwargs = {
                     "status": task["status"],
                     "transcript": task.get("transcript", ""),
@@ -188,7 +188,7 @@ class TranscriptionService:
             task["error"] = traceback.format_exc()
             # Persist error to DB
             try:
-                from services.task_service import TaskService
+                from backend.transcriptions.task_service import TaskService
                 TaskService.update_task(task_id, status="error", error=task["error"])
             except Exception:
                 pass
