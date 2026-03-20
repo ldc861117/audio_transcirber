@@ -5,6 +5,13 @@ from backend.extensions import init_extensions
 from backend.config import configs
 
 def create_app(config_name='development'):
+    # Always load .env regardless of entry point (start.sh uses python -c, not __main__)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     app = Flask(__name__)
     app.config.from_object(configs[config_name])
 

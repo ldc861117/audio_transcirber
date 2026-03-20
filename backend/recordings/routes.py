@@ -1,8 +1,12 @@
+import os
 import threading
+import logging
 from flask import Blueprint, request, jsonify, g
 
 from backend.auth.decorators import jwt_required
 from .service import RecordingSession
+
+logger = logging.getLogger(__name__)
 
 recordings_bp = Blueprint('recordings', __name__)
 
@@ -13,6 +17,7 @@ def start_session():
     """Create a new recording session."""
     uid = g.current_user.id
     session = RecordingSession(user_id=uid)
+    logger.info(f"[Recording] Session started: {session.session_id} for user {uid}")
 
     # Clean up old stale sessions in background
     threading.Thread(
@@ -70,16 +75,30 @@ def finalize_session(session_id):
     try:
         result = session.finalize()
     except ValueError as e:
+        logger.error(f"[Recording] Finalize ValueError: {e}")
         return jsonify({"error": {"code": "BAD_REQUEST", "message": str(e)}}), 400
     except RuntimeError as e:
+        logger.error(f"[Recording] Finalize RuntimeError: {e}")
         return jsonify({"error": {"code": "INTERNAL_ERROR", "message": str(e)}}), 500
+
+    # Verify the output file actually exists before proceeding
+    file_path = result.get("file_path")
+    if not file_path or not os.path.isfile(file_path):
+        logger.error(f"[Recording] Finalize returned but output file missing: {file_path}")
+        return jsonify({"error": {"code": "INTERNAL_ERROR", "message": "Recording file was not created"}}), 500
+
+    logger.info(f"[Recording] Finalized: {file_path} ({result.get('size_mb')} MB)")
 
     # Auto-trigger transcription with Gemini provider
     auto_transcribe = request.json.get("auto_transcribe", True) if request.is_json else True
 
     task_id = None
     if auto_transcribe:
-        task_id = _start_transcription(uid, result["file_path"])
+        task_id = _start_transcription(uid, file_path)
+        if task_id:
+            logger.info(f"[Recording] Auto-transcription started: task_id={task_id}")
+        else:
+            logger.warning(f"[Recording] Auto-transcription failed to start for {file_path}")
 
     result["task_id"] = task_id
     return jsonify({"data": result}), 200
@@ -88,6 +107,11 @@ def finalize_session(session_id):
 def _start_transcription(user_id: int, file_path: str) -> str | None:
     """Trigger transcription on the finalized recording file."""
     try:
+        # Verify file exists before triggering
+        if not os.path.isfile(file_path):
+            logger.error(f"[Transcribe] File not found: {file_path}")
+            return None
+
         import uuid
         from backend.transcriptions.service import TranscriptionService
         from backend.transcriptions.gemini_provider import BUILTIN_PROVIDERS, _get_builtin_key
@@ -95,13 +119,16 @@ def _start_transcription(user_id: int, file_path: str) -> str | None:
 
         builtin = BUILTIN_PROVIDERS.get("gemini")
         if not builtin:
+            logger.error("[Transcribe] Gemini provider not found in BUILTIN_PROVIDERS")
             return None
 
         api_key = _get_builtin_key("gemini")
         if not api_key:
+            logger.error("[Transcribe] Gemini API key not configured")
             return None
 
         task_id = uuid.uuid4().hex[:12]
+        logger.info(f"[Transcribe] Starting transcription: task_id={task_id}, file={file_path}")
 
         t = threading.Thread(
             target=TranscriptionService.run_transcription,
@@ -117,5 +144,5 @@ def _start_transcription(user_id: int, file_path: str) -> str | None:
         return task_id
 
     except Exception as e:
-        print(f"⚠️ Auto-transcription trigger failed: {e}")
+        logger.error(f"[Transcribe] Auto-transcription trigger failed: {e}", exc_info=True)
         return None

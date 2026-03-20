@@ -2,8 +2,11 @@ import os
 import uuid
 import shutil
 import subprocess
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Persistent storage under project data/ directory
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -41,6 +44,9 @@ class RecordingSession:
             f.stat().st_size for f in self.session_dir.glob("chunk_*.webm")
         )
 
+        logger.info(f"[Recording {self.session_id}] Saved chunk {self._chunk_count - 1} "
+                     f"({size_bytes} bytes), total: {round(total_size / (1024*1024), 2)} MB")
+
         return {
             "chunk_index": self._chunk_count - 1,
             "chunk_size_bytes": size_bytes,
@@ -57,10 +63,11 @@ class RecordingSession:
 
         # Output file sits alongside the session directory
         output_path = self.session_dir.parent / f"{self.session_id}.webm"
+        logger.info(f"[Recording {self.session_id}] Finalizing {len(chunk_files)} chunks -> {output_path}")
 
         if len(chunk_files) == 1:
-            # Single chunk: just move it
-            shutil.move(str(chunk_files[0]), str(output_path))
+            # Single chunk: just copy (not move, so we preserve fallback)
+            shutil.copy2(str(chunk_files[0]), str(output_path))
         else:
             # Multiple chunks: use ffmpeg concat demuxer
             concat_list = self.session_dir / "concat_list.txt"
@@ -76,14 +83,21 @@ class RecordingSession:
                 "-c", "copy",
                 str(output_path),
             ]
+            logger.info(f"[Recording {self.session_id}] Running: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
+                logger.error(f"[Recording {self.session_id}] ffmpeg failed: {result.stderr[:500]}")
                 raise RuntimeError(f"ffmpeg concat failed: {result.stderr[:500]}")
 
-        # Get file info
-        file_size_mb = output_path.stat().st_size / (1024 * 1024)
+        # Verify output exists
+        if not output_path.exists():
+            logger.error(f"[Recording {self.session_id}] Output file missing after concat!")
+            raise RuntimeError("Output file not created by ffmpeg")
 
-        # Clean up chunk directory
+        file_size_mb = output_path.stat().st_size / (1024 * 1024)
+        logger.info(f"[Recording {self.session_id}] ✅ Finalized: {output_path} ({round(file_size_mb, 2)} MB)")
+
+        # Only clean up chunks AFTER verifying output
         shutil.rmtree(self.session_dir, ignore_errors=True)
 
         return {
@@ -101,7 +115,9 @@ class RecordingSession:
 
     @staticmethod
     def cleanup_stale_sessions(user_id: int, max_age_hours: int = 24):
-        """Remove session directories older than max_age_hours."""
+        """Remove session directories older than max_age_hours.
+        Only cleans up session DIRECTORIES (not finalized .webm files).
+        """
         user_dir = RECORDINGS_DIR / str(user_id)
         if not user_dir.exists():
             return
@@ -110,4 +126,5 @@ class RecordingSession:
             if session_dir.is_dir():
                 age_hours = (now - session_dir.stat().st_mtime) / 3600
                 if age_hours > max_age_hours:
+                    logger.info(f"[Cleanup] Removing stale session dir: {session_dir}")
                     shutil.rmtree(session_dir, ignore_errors=True)
