@@ -48,4 +48,13 @@ export const api = {
         responseType: "blob",
       }),
   },
+  recordings: {
+    start: () => client.post("/recordings/start"),
+    appendChunk: (sessionId, formData) =>
+      client.post(`/recordings/${sessionId}/chunk`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }),
+    finalize: (sessionId, options = {}) =>
+      client.post(`/recordings/${sessionId}/finalize`, options),
+  },
 };

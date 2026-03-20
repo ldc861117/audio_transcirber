@@ -36,6 +36,9 @@ def create_app(config_name='development'):
     from backend.exports.routes import export_bp
     app.register_blueprint(export_bp, url_prefix='/api/v2/export')
 
+    from backend.recordings.routes import recordings_bp
+    app.register_blueprint(recordings_bp, url_prefix='/api/v2/recordings')
+
     # Global error handlers
     @app.errorhandler(400)
     def bad_request(e):
