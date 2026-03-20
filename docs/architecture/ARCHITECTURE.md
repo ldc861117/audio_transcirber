@@ -2,44 +2,103 @@
 
 ## Overview
 
-The Audio Transcriber is a Flask-based web application designed to split large audio files and transcribe them using OpenAI-compatible APIs (e.g., Aliyun SenseVoice, OpenAI Whisper).
+Audio Transcriber is a SaaS web application for splitting large audio files and transcribing them via OpenAI-compatible APIs. The system uses a **decoupled frontend/backend** architecture with JWT authentication and Stripe-integrated subscriptions.
 
-## System Components
+## System Architecture
 
-### 1. Backend (`app.py`)
+```
+┌──────────────────┐         ┌──────────────────────────────┐
+│  React Frontend  │  HTTP   │       Flask Backend           │
+│  (Vite :3000)    │ ◄─────► │       (API :5099)             │
+│                  │  JSON   │                               │
+│  pages/          │         │  api/v2/auth/*                │
+│  components/     │         │  api/v2/transcriptions/*      │
+│  stores/         │         │  api/v2/speakers/*            │
+│  api/            │         │  api/v2/subscriptions/*       │
+└──────────────────┘         │  api/v2/export/*              │
+                             │  api/v2/recordings/*          │
+                             └──────────┬───────────────────┘
+                                        │
+                             ┌──────────▼───────────────────┐
+                             │     Data Layer                │
+                             │  SQLite (data/tasks.db)       │
+                             │  SQLAlchemy (data/app.db)     │
+                             └──────────────────────────────┘
+```
 
-- **Framework**: Flask.
-- **Core Logic**:
-  - **Audio Splitting**: Uses `pydub` (ffmpeg) to split audio into chunks based on duration (default 10 mins) and size (default 20MB) to fit API limits.
-  - **Transcription**: Uses `openai` python client to send chunks to a compatible API.
-  - **Concurrency**: User requests spawn background threads to handle the split-transcribe-merge workflow.
-  - **State Management**: In-memory `tasks` dictionary tracks progress and results.
+## Backend Modules (`backend/`)
 
-### 2. Frontend (`static/`)
+| Module | Prefix | Responsibility |
+|---|---|---|
+| `auth/` | `/api/v2/auth` | JWT login/register, token refresh, user profile |
+| `transcriptions/` | `/api/v2/transcriptions` | Upload, split, transcribe, status polling, speaker labeling |
+| `speakers/` | `/api/v2/speakers` | Speaker profile CRUD, voice clip management |
+| `exports/` | `/api/v2/export` | Export transcripts (SRT, TXT, DOCX) |
+| `subscriptions/` | `/api/v2/subscriptions` | Stripe checkout, plans, invoices, webhooks |
+| `recordings/` | `/api/v2/recordings` | Real-time recording sessions (chunk upload) |
+| `db/` | — | Database connections (SQLite for tasks, SQLAlchemy for auth) |
+| `utils/` | — | Shared response helpers (`success_response`, `error_response`) |
 
-- **Structure**: `index.html` (Single Page Application feel), `style.css`, `script.js`.
-- **Interaction**:
-  - Users upload files via a form.
-  - Javascript polls the `/api/status/<task_id>` endpoint to show progress bars.
-  - Displays final transcription results.
+### Module Structure (Convention)
 
-### 3. Data Flow
+Each module follows a consistent pattern:
+```
+backend/<module>/
+├── __init__.py       # Blueprint declaration
+├── routes.py         # HTTP endpoint definitions
+├── service.py        # Business logic
+├── models.py         # SQLAlchemy/dataclass models (if needed)
+└── db.py             # Database queries (if needed)
+```
 
-1.  **Upload**: User uploads audio -> Saved to temp dir (`/tmp/audio_transcriber_uploads` or similar).
-2.  **Processing**:
-    - `split_audio()`: Original file -> Chunk files.
-    - `run_transcription()`: Iterate chunks -> API Call -> Text segment.
-3.  **Output**: Segments are merged into a single transcript.
+## Frontend (`frontend/`)
+
+Built with **React + Vite**, organized by feature:
+
+```
+frontend/src/
+├── api/              # HTTP client, endpoints config
+├── pages/            # Route-level page components
+├── components/       # Reusable UI components
+├── stores/           # Zustand state management
+└── styles/           # Global CSS
+```
+
+## Authentication Flow
+
+1. User registers/logs in → Backend issues **JWT access token** (15min) + **refresh token** (7 days)
+2. Frontend stores tokens → Sends `Authorization: Bearer <token>` with every request
+3. `@jwt_required` decorator on protected routes validates tokens
+4. Token refresh happens transparently when access token expires
+
+## Transcription Data Flow
+
+1. **Upload**: User uploads audio → saved to `data/uploads/`
+2. **Split**: `audio_utils.py` splits file by duration/size constraints using `pydub`
+3. **Transcribe**: `service.py` spawns background thread → sends chunks to API
+4. **Persist**: Results saved to SQLite via `TaskService`
+5. **Poll**: Frontend polls `GET /api/v2/transcriptions/<task_id>` for progress
 
 ## Key Dependencies
 
-- `flask`: Web server.
-- `pydub`: Audio processing.
-- `openai`: API client.
+| Package | Purpose |
+|---|---|
+| `flask` | Web framework |
+| `flask-sqlalchemy` | ORM for auth/subscription data |
+| `pyjwt` | JWT token management |
+| `pydub` | Audio file processing (requires `ffmpeg`) |
+| `openai` | OpenAI-compatible API client |
+| `stripe` | Payment processing |
+| `google-genai` | Gemini provider support |
 
-## Directory Structure
+## Configuration
 
-- `/`: Root directory.
-- `app.py`: Main entry point.
-- `static/`: Frontend assets.
-- `docs_local/`: Local documentation and resources.
+- **Environment**: `.env` file at project root (see `.env.example`)
+- **Config class**: `backend/config.py` (Development / Production)
+- **Databases**: `data/app.db` (SQLAlchemy), `data/tasks.db` (raw SQLite)
+
+## Running
+
+```bash
+./start.sh    # Starts backend (:5099) + frontend (:3000)
+```
