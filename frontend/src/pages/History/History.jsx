@@ -43,8 +43,8 @@ const History = () => {
     setLoading(true);
     try {
       const res = await api.transcriptions.list({ page, per_page: 15, search });
-      setTasks(res.data.items || []);
-      setTotal(res.data.total || 0);
+      setTasks(res.data.data || []);
+      setTotal(res.data.meta?.total || 0);
     } catch (err) {
       console.error('Failed to load history', err);
     } finally {
@@ -70,8 +70,8 @@ const History = () => {
       let anyFinished = false;
       for (const task of activeTasks) {
         try {
-          const res = await api.transcriptions.status(task.id);
-          updates[task.id] = res.data;
+          const res = await api.transcriptions.status(task.task_id);
+          updates[task.task_id] = res.data;
           if (res.data.status === 'done' || res.data.status === 'error') {
             anyFinished = true;
           }
@@ -103,7 +103,8 @@ const History = () => {
   useEffect(() => {
     if (expandedId && !expandedData) {
       api.transcriptions.status(expandedId)
-        .then(res => setExpandedData(res.data))
+        .then(res => setExpandedData(res.data?.data || res.data))
+
         .catch(() => setExpandedData(null));
     }
   }, [expandedId]);
@@ -118,7 +119,7 @@ const History = () => {
     setExpandedData(null);
     try {
       const res = await api.transcriptions.status(taskId);
-      setExpandedData(res.data);
+      setExpandedData(res.data?.data || res.data);
     } catch (err) {
       setExpandedData({ error: '无法加载详情' });
     }
@@ -223,26 +224,25 @@ const History = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {tasks.map(task => {
             const isActive = ACTIVE_STATUSES.includes(task.status);
-            const prog = getTaskProgress(task.id);
+            const prog = getTaskProgress(task.task_id);
             const liveStatus = prog?.status || task.status;
             const liveStatusInfo = STATUS_MAP[liveStatus] || STATUS_MAP[task.status];
 
             return (
-            <div key={task.id}>
-              <div onClick={() => handleExpand(task.id)}
+            <div key={task.task_id}>
+              <div onClick={() => handleExpand(task.task_id)}
                 className="card" style={{
                   padding: '1rem 1.5rem', cursor: 'pointer',
                   display: 'grid', gridTemplateColumns: '1fr auto auto auto',
                   alignItems: 'center', gap: '1rem',
-                  borderLeft: expandedId === task.id ? '3px solid #5e97f6' : '3px solid transparent',
+                  borderLeft: expandedId === task.task_id ? '3px solid #5e97f6' : '3px solid transparent',
                 }}>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {task.filename}
+                    {task.file_name || '未命名录音'}
                   </span>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    {formatDate(task.created_at)} · {task.file_size_mb?.toFixed(1)} MB
-                    {task.duration_seconds > 0 && ` · ${formatDuration(task.duration_seconds)}`}
+                    {formatDate(task.created_at)}
                     {task.provider && ` · ${task.provider}`}
                   </span>
 
@@ -279,33 +279,33 @@ const History = () => {
                   {/* Transcribe button for saved recordings */}
                   {(task.status === 'recorded' || task.status === 'error') && (
                     <button
-                      onClick={(e) => handleTranscribe(task.id, e)}
-                      disabled={transcribing[task.id]}
+                      onClick={(e) => handleTranscribe(task.task_id, e)}
+                      disabled={transcribing[task.task_id]}
                       style={{
                         padding: '4px 12px', borderRadius: '6px', fontSize: '0.8rem',
                         fontWeight: 600, border: '1px solid #5e97f6',
                         backgroundColor: 'rgba(94,151,246,0.1)', color: '#5e97f6',
-                        cursor: transcribing[task.id] ? 'wait' : 'pointer',
-                        opacity: transcribing[task.id] ? 0.6 : 1,
+                        cursor: transcribing[task.task_id] ? 'wait' : 'pointer',
+                        opacity: transcribing[task.task_id] ? 0.6 : 1,
                         transition: 'all 0.2s',
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {transcribing[task.id] ? '⏳ 启动中...' : '🚀 开始转写'}
+                      {transcribing[task.task_id] ? '⏳ 启动中...' : '🚀 开始转写'}
                     </button>
                   )}
                 </div>
 
-                <button onClick={(e) => handleDelete(task.id, e)}
+                <button onClick={(e) => handleDelete(task.task_id, e)}
                   style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid var(--border)', backgroundColor: 'transparent', color: '#ff3b30', cursor: 'pointer', fontSize: '0.8rem' }}>
                   🗑️
                 </button>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  {expandedId === task.id ? '▲' : '▼'}
+                  {expandedId === task.task_id ? '▲' : '▼'}
                 </span>
               </div>
 
-              {expandedId === task.id && (
+              {expandedId === task.task_id && (
                 <div className="card" style={{ padding: '1.5rem', marginTop: '0.25rem', borderLeft: '3px solid #5e97f6' }}>
                   {task.status === 'recorded' ? (
                     <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
@@ -361,7 +361,7 @@ const History = () => {
                         speakers={expandedData.speakers || []}
                         enableDiarization={expandedData.enable_diarization}
                       />
-                      <ExportPanel taskId={task.id} />
+                      <ExportPanel taskId={task.task_id} />
                     </>
                   ) : (
                     <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>加载中...</div>
