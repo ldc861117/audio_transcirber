@@ -1,34 +1,12 @@
 from flask import Blueprint, request, jsonify, g, current_app
-from functools import wraps
 from .models import db, Subscription, QuotaUsage, Invoice
 from .plan_config import get_all_plans, get_plan_config
 from .stripe_service import StripeService
 from .quota_service import QuotaService
 from datetime import datetime
+from backend.auth.decorators import jwt_required
 
 subscription_bp = Blueprint('subscriptions', __name__)
-
-# Temporary mock decorator for JWT, to be replaced by Track A
-def jwt_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        # Track A will provide the actual logic
-        # For now we'll assume there is a way to get the user_id
-        # In mock mode, we'll default to 1
-        # In real mode, it'll come from the JWT token
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-             # If no auth header, just use 1 for testing
-             g.current_user = type('User', (), {'id': 1, 'username': 'testuser', 'email': 'test@example.com'})()
-        else:
-             # Assume Bearer <id> for now
-             try:
-                 user_id = int(auth_header.split(' ')[1])
-                 g.current_user = type('User', (), {'id': user_id, 'username': 'testuser', 'email': 'test@example.com'})()
-             except:
-                 g.current_user = type('User', (), {'id': 1, 'username': 'testuser', 'email': 'test@example.com'})()
-        return f(*args, **kwargs)
-    return decorated
 
 @subscription_bp.route('/plans', methods=['GET'])
 def list_plans():

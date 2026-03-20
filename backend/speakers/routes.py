@@ -2,13 +2,7 @@ from flask import Blueprint, request, jsonify, send_from_directory, g
 from pathlib import Path
 from .service import SpeakerService
 from .db import CLIPS_DIR, get_profile
-
-# Mock jwt_required if not available from Track A
-try:
-    from backend.auth.routes import jwt_required
-except ImportError:
-    def jwt_required(f):
-        return f
+from backend.auth.decorators import jwt_required
 
 speaker_bp = Blueprint("speakers", __name__)
 

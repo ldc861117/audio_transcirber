@@ -1,9 +1,13 @@
 import os
+import json
+import logging
 import traceback
 from datetime import datetime, timezone
 from openai import OpenAI
 from .audio_utils import split_audio
 from .gemini_provider import transcribe_chunk
+
+logger = logging.getLogger(__name__)
 
 try:
     from zhipuai import ZhipuAI
@@ -163,20 +167,30 @@ class TranscriptionService:
             else:
                 task["status"] = "done"
 
-            # ── Persist final result to DB (via TaskService) ──
-            # from services.task_service import TaskService
-            # TaskService.update_task(...)
+            # ── Persist final result to DB ──
+            try:
+                from services.task_service import TaskService
+                update_kwargs = {
+                    "status": task["status"],
+                    "transcript": task.get("transcript", ""),
+                    "error": task.get("error", ""),
+                    "chunk_count": task.get("total_chunks", 0),
+                }
+                if task.get("speakers"):
+                    update_kwargs["speakers"] = task["speakers"]
+                TaskService.update_task(task_id, **update_kwargs)
+                logger.info(f"[Transcription] Task {task_id} persisted to DB (status={task['status']})")
+            except Exception as e:
+                logger.warning(f"[Transcription] DB persist failed (non-fatal): {e}")
 
         except Exception:
             task["status"] = "error"
             task["error"] = traceback.format_exc()
+            # Persist error to DB
+            try:
+                from services.task_service import TaskService
+                TaskService.update_task(task_id, status="error", error=task["error"])
+            except Exception:
+                pass
         finally:
-            # Keep the original recording file — user may need it
-            # If temp chunks were created, they are cleaned up by split_audio or above logic
             pass
-            
-            # Integration with Track B QuotaService to deduct quota
-            # try:
-            #     from backend.subscriptions.service import QuotaService
-            #     QuotaService.deduct_quota(user_id, task_id)
-            # except Exception: pass

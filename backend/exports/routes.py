@@ -1,13 +1,11 @@
 import io
+import logging
 from flask import Blueprint, request, send_file, jsonify, g
 from .service import ExportService
+from backend.auth.decorators import jwt_required
+from backend.utils.responses import not_found
 
-# Mock jwt_required if not available from Track A
-try:
-    from backend.auth.routes import jwt_required
-except ImportError:
-    def jwt_required(f):
-        return f
+logger = logging.getLogger(__name__)
 
 export_bp = Blueprint("export", __name__)
 export_service = ExportService()
@@ -15,16 +13,19 @@ export_service = ExportService()
 @export_bp.route("/<task_id>", methods=["GET", "POST"])
 @jwt_required
 def export_task(task_id):
-    uid = getattr(g, 'user_id', 0)
+    uid = g.current_user.id if getattr(g, 'current_user', None) else 0
     
     # GET: pull data from DB; POST: use provided data
     if request.method == "GET":
-        # from services.task_service import TaskService
-        # task_data = TaskService.get_task(task_id, uid)
-        task_data = None # Mock for now
+        task_data = None
+        try:
+            from services.task_service import TaskService
+            task_data = TaskService.get_task(task_id, uid)
+        except Exception as e:
+            logger.warning(f"[Export] DB get_task failed: {e}")
         
         if not task_data:
-            return jsonify({"error": {"code": "NOT_FOUND", "message": "\u4efb\u52a1\u4e0d\u5b58\u5728"}}), 404
+            return not_found("任务不存在")
             
         fmt = request.args.get("format", "txt").lower()
         transcript = task_data.get("transcript", "")
