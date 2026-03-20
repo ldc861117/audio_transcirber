@@ -1,5 +1,6 @@
 import os
 import traceback
+from datetime import datetime, timezone
 from openai import OpenAI
 from .audio_utils import split_audio
 from .gemini_provider import transcribe_chunk
@@ -42,7 +43,10 @@ class TranscriptionService:
             "total_chunks": 0,
             "transcript": "",
             "error": "",
-            "speakers": []
+            "speakers": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "file_name": os.path.basename(filepath),
+            "provider": provider,
         }
         tasks[user_id][task_id] = task
 
@@ -167,10 +171,9 @@ class TranscriptionService:
             task["status"] = "error"
             task["error"] = traceback.format_exc()
         finally:
-            try:
-                os.unlink(original_filepath)
-            except OSError:
-                pass
+            # Keep the original recording file — user may need it
+            # If temp chunks were created, they are cleaned up by split_audio or above logic
+            pass
             
             # Integration with Track B QuotaService to deduct quota
             # try:

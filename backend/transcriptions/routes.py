@@ -61,7 +61,8 @@ def upload():
     file_size_mb = os.path.getsize(save_path) / (1024 * 1024)
 
     # Use user from g (set by jwt_required)
-    uid = getattr(g, 'user_id', 0)
+    uid = getattr(g, 'current_user', None)
+    uid = uid.id if uid else 0
 
     # ── [NEW] Quota Check (Track B) ──
     # try:
@@ -93,7 +94,7 @@ def upload():
 @transcription_bp.route("/<task_id>", methods=["GET"])
 @jwt_required
 def status(task_id):
-    uid = getattr(g, 'user_id', 0)
+    uid = g.current_user.id if getattr(g, 'current_user', None) else 0
     user_tasks = tasks.get(uid, {})
     task = user_tasks.get(task_id)
     if task:
@@ -109,8 +110,33 @@ def status(task_id):
 @transcription_bp.route("/", methods=["GET"])
 @jwt_required
 def list_tasks():
-    # Implementation for listing tasks with pagination
-    return jsonify({"data": [], "meta": {"total": 0, "page": 1, "per_page": 20, "total_pages": 0}})
+    uid = g.current_user.id if getattr(g, 'current_user', None) else 0
+    page = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 20))
+
+    user_tasks = tasks.get(uid, {})
+    # Convert in-memory dict to sorted list (newest first)
+    task_list = []
+    for tid, t in user_tasks.items():
+        task_list.append({
+            "task_id": tid,
+            "status": t.get("status", "unknown"),
+            "transcript": t.get("transcript", "")[:200] if t.get("transcript") else "",
+            "error": t.get("error", ""),
+            "created_at": t.get("created_at", ""),
+            "file_name": t.get("file_name", ""),
+            "provider": t.get("provider", ""),
+        })
+    # Reverse so newest first
+    task_list.reverse()
+
+    total = len(task_list)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_items = task_list[start:end]
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    return jsonify({"data": page_items, "meta": {"total": total, "page": page, "per_page": per_page, "total_pages": total_pages}})
 
 @transcription_bp.route("/<task_id>", methods=["DELETE"])
 @jwt_required
