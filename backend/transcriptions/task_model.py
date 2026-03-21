@@ -41,10 +41,20 @@ class TranscriptionRecord:
         return cls(**data)
 
     def to_dict(self) -> dict:
-        """Convert the record to a dictionary, suitable for API responses."""
+        """Convert the record to a dictionary, suitable for API responses.
+
+        Adds frontend-expected aliases:
+        - task_id  → same as 'id'  (frontend reads task.task_id)
+        - file_name → same as 'filename' (frontend reads task.file_name)
+        """
         d = asdict(self)
         d["created_at"] = self.created_at.isoformat()
         d["updated_at"] = self.updated_at.isoformat()
+
+        # Frontend aliases
+        d["task_id"] = d["id"]
+        d["file_name"] = d["filename"]
+
         if self.speakers_json:
             try:
                 d["speakers"] = json.loads(self.speakers_json)
