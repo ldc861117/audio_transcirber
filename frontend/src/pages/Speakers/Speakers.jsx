@@ -13,7 +13,7 @@ const Speakers = () => {
   const fetchProfiles = async () => {
     try {
       const res = await api.speakers.list();
-      setProfiles(res.data.profiles || []);
+      setProfiles(res.data?.data || res.data?.profiles || []);
     } catch (err) {
       console.error('Failed to load speakers:', err);
     } finally {

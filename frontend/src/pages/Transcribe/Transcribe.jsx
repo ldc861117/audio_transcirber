@@ -33,8 +33,9 @@ const Transcribe = () => {
     pollRef.current = setInterval(async () => {
       try {
         const res = await api.transcriptions.status(id);
-        setTaskData(res.data);
-        if (res.data.status === 'done' || res.data.status === 'error') {
+        const taskResult = res.data?.data || res.data;
+        setTaskData(taskResult);
+        if (taskResult.status === 'done' || taskResult.status === 'error') {
           clearInterval(pollRef.current);
           pollRef.current = null;
         }
@@ -75,7 +76,8 @@ const Transcribe = () => {
 
     try {
       const res = await api.transcriptions.upload(formData);
-      const id = res.data.task_id;
+      const d = res.data?.data || res.data;
+      const id = d.task_id;
       setTaskId(id);
       setTaskData({ status: 'queued', filename: file.name });
       pollStatus(id);
