@@ -1,14 +1,16 @@
 """
-Task service module for Audio Transcriber.
-Provides business logic for managing transcription tasks.
+Task service for Audio Transcriber.
+Business logic for managing transcription tasks in the database.
+
+Consolidated from root services/task_service.py during Phase 3 cleanup.
 """
 
 import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from db.task_db import _get_db, init_task_db
-from models.task import TranscriptionRecord
+from backend.db.task_db import get_task_db, init_task_db
+from .task_model import TranscriptionRecord
 
 # Initialize the database table on import
 init_task_db()
@@ -27,12 +29,12 @@ class TaskService:
     ) -> str:
         """Create a new transcription task in the database."""
         now = datetime.now().isoformat()
-        with _get_db() as conn:
+        with get_task_db() as conn:
             conn.execute(
                 """
                 INSERT INTO transcriptions (
-                    id, user_id, filename, file_size_mb, status, 
-                    created_at, updated_at, enable_diarization, 
+                    id, user_id, filename, file_size_mb, status,
+                    created_at, updated_at, enable_diarization,
                     provider, model
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -65,55 +67,37 @@ class TaskService:
         speakers = task.get("speakers", [])
         transcript = task.get("transcript", "")
 
-        # Build update maps
         label_to_new_name = {}
         for update in speaker_updates:
             label = update.get("label")
             new_name = update.get("name")
             matched_id = update.get("matched_profile_id")
-
             if label:
                 label_to_new_name[label] = {
                     "name": new_name,
-                    "matched_profile_id": matched_id
+                    "matched_profile_id": matched_id,
                 }
 
         # 1. Update speakers metadata
         for spk in speakers:
-            update = label_to_new_name.get(spk["label"])
-            if update:
-                spk["matched_name"] = update["name"]
-                spk["matched_profile_id"] = update["matched_profile_id"]
+            info = label_to_new_name.get(spk["label"])
+            if info:
+                spk["matched_name"] = info["name"]
+                spk["matched_profile_id"] = info["matched_profile_id"]
 
         # 2. Synchronize transcript labels
-        # Assuming the transcript format uses 【Speaker Label】 or [Speaker Label]
-        # Based on DiarizationService._generate_transcript, it uses [Name]
-        # But based on app.py's run_transcription, it uses 【Label】
-        # Let's handle both or check how it was generated.
-        # TranscriptView.jsx uses 【(.+?)】 regex.
-
         for label, info in label_to_new_name.items():
             new_name = info["name"]
             if not new_name or new_name == label:
                 continue
-
-            # Find the old name/label that might be in the transcript
-            # We need to find what the current display name is for this speaker label
-            current_display_name = label
+            current_display = label
             for spk in task.get("speakers", []):
                 if spk["label"] == label:
-                    current_display_name = spk.get("matched_name") or spk["label"]
+                    current_display = spk.get("matched_name") or spk["label"]
                     break
-
-            if current_display_name != new_name:
-                old_tag = f"【{current_display_name}】"
-                new_tag = f"【{new_name}】"
-                transcript = transcript.replace(old_tag, new_tag)
-
-                # Also handle [Name] format if present
-                old_tag_br = f"[{current_display_name}]"
-                new_tag_br = f"[{new_name}]"
-                transcript = transcript.replace(old_tag_br, new_tag_br)
+            if current_display != new_name:
+                transcript = transcript.replace(f"【{current_display}】", f"【{new_name}】")
+                transcript = transcript.replace(f"[{current_display}]", f"[{new_name}]")
 
         return TaskService.update_task(task_id, speakers=speakers, transcript=transcript)
 
@@ -125,7 +109,6 @@ class TaskService:
 
         kwargs["updated_at"] = datetime.now().isoformat()
 
-        # Handle special field conversions
         if "enable_diarization" in kwargs:
             kwargs["enable_diarization"] = 1 if kwargs["enable_diarization"] else 0
         if "speakers" in kwargs:
@@ -135,7 +118,7 @@ class TaskService:
         values = list(kwargs.values())
         values.append(task_id)
 
-        with _get_db() as conn:
+        with get_task_db() as conn:
             cursor = conn.execute(
                 f"UPDATE transcriptions SET {fields} WHERE id = ?", tuple(values)
             )
@@ -145,7 +128,7 @@ class TaskService:
     @staticmethod
     def get_task(task_id: str, user_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve a specific task for a user."""
-        with _get_db() as conn:
+        with get_task_db() as conn:
             row = conn.execute(
                 "SELECT * FROM transcriptions WHERE id = ? AND user_id = ?",
                 (task_id, user_id),
@@ -168,11 +151,11 @@ class TaskService:
             params.append(f"%{search}%")
 
         count_query = query.replace("*", "COUNT(*)")
-        
+
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([per_page, offset])
 
-        with _get_db() as conn:
+        with get_task_db() as conn:
             total = conn.execute(count_query, tuple(params[:-2])).fetchone()[0]
             rows = conn.execute(query, tuple(params)).fetchall()
 
@@ -182,13 +165,13 @@ class TaskService:
             "total": total,
             "page": page,
             "per_page": per_page,
-            "total_pages": (total + per_page - 1) // per_page
+            "total_pages": (total + per_page - 1) // per_page,
         }
 
     @staticmethod
     def delete_task(task_id: str, user_id: int) -> bool:
         """Delete a task for a user."""
-        with _get_db() as conn:
+        with get_task_db() as conn:
             cursor = conn.execute(
                 "DELETE FROM transcriptions WHERE id = ? AND user_id = ?",
                 (task_id, user_id),

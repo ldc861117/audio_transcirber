@@ -1,15 +1,50 @@
 :root {
-  --bg-color: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --accent-primary: #3b82f6;
-  --accent-secondary: #6366f1;
-  --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  --success: #10b981;
-  --error: #ef4444;
-  --warning: #f59e0b;
-  --border-radius: 12px;
-  --transition: all 0.2s ease-in-out;
+  /* ─── Core Surfaces ─── */
+  --bg-color:         #0b1326;
+  --bg-secondary:     #131b2e;
+  --bg-tertiary:      #171f33;
+  --bg-elevated:      #222a3d;
+
+  /* ─── Primary (Violet) ─── */
+  --accent-primary:   #d0bcff;
+  --accent-secondary: #a078ff;
+  --on-primary:       #3c0091;
+  --accent-gradient:  linear-gradient(135deg, #a078ff 0%, #d0bcff 100%);
+
+  /* ─── Tertiary (Warm Amber) ─── */
+  --accent-warm:      #ffb869;
+  --accent-warm-dim:  #ca801e;
+
+  /* ─── Text ─── */
+  --text-primary:     #dae2fd;
+  --text-secondary:   #cbc3d7;
+  --text-disabled:    #958ea0;
+
+  /* ─── Functional ─── */
+  --success:          #10b981;
+  --error:            #ffb4ab;
+  --warning:          #f59e0b;
+
+  /* ─── Glass Effects ─── */
+  --glass-panel:      rgba(2, 6, 23, 0.7);
+  --glass-card:       rgba(34, 42, 61, 0.4);
+  --glass-subtle:     rgba(255, 255, 255, 0.03);
+
+  /* ─── Shadows ─── */
+  --shadow-ai-glow:   0 0 15px -2px rgba(208, 188, 255, 0.3);
+  --shadow-card:      0 4px 6px -1px rgba(0, 0, 0, 0.3);
+
+  /* ─── Geometry ─── */
+  --border-radius:    12px;
+  --border-radius-lg: 20px;
+  --border-radius-xl: 24px;
+  --transition:       all 0.2s ease-in-out;
+
+  /* ─── Typography ─── */
+  --font-headline:    'Manrope', sans-serif;
+  --font-body:        'Inter', 'Noto Sans SC', sans-serif;
+
+  /* ─── Sidebar ─── */
+  --sidebar-width:    264px;
+  --sidebar-collapsed: 80px;
 }

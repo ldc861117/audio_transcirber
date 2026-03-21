@@ -5,6 +5,13 @@ from backend.extensions import init_extensions
 from backend.config import configs
 
 def create_app(config_name='development'):
+    # Always load .env regardless of entry point (start.sh uses python -c, not __main__)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     app = Flask(__name__)
     app.config.from_object(configs[config_name])
 
@@ -35,6 +42,9 @@ def create_app(config_name='development'):
 
     from backend.exports.routes import export_bp
     app.register_blueprint(export_bp, url_prefix='/api/v2/export')
+
+    from backend.recordings.routes import recordings_bp
+    app.register_blueprint(recordings_bp, url_prefix='/api/v2/recordings')
 
     # Global error handlers
     @app.errorhandler(400)

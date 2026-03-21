@@ -9,8 +9,11 @@ import {
   Volume2,
   Save,
   CheckCircle2,
-  Loader2
+  Loader2,
+  HardDrive
 } from 'lucide-react';
+
+const CHUNK_INTERVAL_MS = 30_000; // 30s per chunk upload
 
 const Recorder = ({ onRecorded, onSaved }) => {
   const [recording, setRecording] = useState(false);
@@ -22,10 +25,11 @@ const Recorder = ({ onRecorded, onSaved }) => {
   const [error, setError] = useState('');
   const [sleepSaved, setSleepSaved] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saveResult, setSaveResult] = useState(null); // { success, taskId } or null
+  const [saveResult, setSaveResult] = useState(null);
+  const [chunksUploaded, setChunksUploaded] = useState(0);
 
   const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
+  const chunksRef = useRef([]); // in-memory fallback
   const timerRef = useRef(null);
   const startTimeRef = useRef(0);
   const audioCtxRef = useRef(null);
@@ -34,7 +38,10 @@ const Recorder = ({ onRecorded, onSaved }) => {
   const micStreamRef = useRef(null);
   const sysStreamRef = useRef(null);
   const lastTickRef = useRef(Date.now());
-  const recordingRef = useRef(false); // stable ref for event listeners
+  const recordingRef = useRef(false);
+  const sessionIdRef = useRef(null);
+  const chunkIndexRef = useRef(0);
+  const uploadQueueRef = useRef(Promise.resolve()); // serialize uploads
 
   // Enumerate microphones on mount
   useEffect(() => {
@@ -59,50 +66,98 @@ const Recorder = ({ onRecorded, onSaved }) => {
     };
   }, []);
 
-  // ── System sleep/hibernation detection ──
-  // Auto-save file to backend history with 'recorded' status
-  const autoSaveToHistory = useCallback(async (file) => {
+  // ── Upload a single chunk to the backend ──
+  const uploadChunk = useCallback(async (blob) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || blob.size === 0) return;
+
+    const formData = new FormData();
+    formData.append('chunk', blob, `chunk_${chunkIndexRef.current}.webm`);
+
+    try {
+      await api.recordings.appendChunk(sessionId, formData);
+      chunkIndexRef.current += 1;
+      setChunksUploaded(prev => prev + 1);
+    } catch (err) {
+      console.error('[Recorder] Chunk upload failed:', err);
+      // Keep in memory as fallback - don't crash
+    }
+  }, []);
+
+  // Queue chunk upload to ensure sequential ordering
+  const enqueueChunkUpload = useCallback((blob) => {
+    // Always keep in-memory copy as fallback
+    chunksRef.current.push(blob);
+
+    uploadQueueRef.current = uploadQueueRef.current
+      .then(() => uploadChunk(blob))
+      .catch(err => console.error('[Recorder] Upload queue error:', err));
+  }, [uploadChunk]);
+
+  // ── Finalize: concat on server + trigger transcription ──
+  const finalizeSession = useCallback(async () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+
     setSaving(true);
     setSaveResult(null);
+
     try {
-      const formData = new FormData();
-      formData.append('audio', file);
-      const res = await api.recordings.save(formData);
-      const taskId = res.data.task_id;
-      setSaveResult({ success: true, taskId });
+      // Wait for any pending chunk uploads to finish
+      await uploadQueueRef.current;
+
+      const res = await api.recordings.finalize(sessionId, { auto_transcribe: true });
+      const data = res.data?.data;
+      const taskId = data?.task_id;
+
+      setSaveResult({ success: true, taskId, sizeMb: data?.size_mb });
       onSaved?.(taskId);
     } catch (err) {
-      console.error('Auto-save failed:', err);
-      setSaveResult({ success: false });
+      console.error('[Recorder] Finalize failed:', err);
+      // Fallback: try to save the in-memory Blob directly
+      try {
+        await fallbackUpload();
+      } catch {
+        setSaveResult({ success: false });
+      }
     } finally {
       setSaving(false);
+      sessionIdRef.current = null;
     }
   }, [onSaved]);
 
-  // Emergency save: build a file from whatever chunks we have collected so far
-  const emergencySave = useCallback(() => {
-    if (chunksRef.current.length > 0) {
-      const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
-      stopAllStreams();
-      onRecorded?.(file);
-      autoSaveToHistory(file);
-    } else {
-      stopAllStreams();
+  // Fallback: upload full recording from in-memory chunks
+  const fallbackUpload = useCallback(async () => {
+    if (chunksRef.current.length === 0) {
+      setSaveResult({ success: false });
+      return;
     }
-  }, [onRecorded, autoSaveToHistory]);
+    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    const formData = new FormData();
+    formData.append('audio', new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' }));
+    formData.append('provider', 'gemini');
+    const res = await api.transcriptions.upload(formData);
+    const taskId = res.data?.data?.task_id || res.data?.task_id;
+    setSaveResult({ success: true, taskId });
+    onSaved?.(taskId);
+  }, [onSaved]);
+
+  // Emergency save for sleep/crash detection
+  const emergencySave = useCallback(() => {
+    // Chunks are already streaming to backend, just finalize
+    stopAllStreams();
+    finalizeSession();
+  }, [finalizeSession]);
 
   const emergencyStop = useCallback(() => {
     if (!recordingRef.current) return;
     recordingRef.current = false;
 
-    // Try to gracefully stop MediaRecorder to flush remaining data
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
       try {
         recorder.stop();
       } catch {
-        // If stop() fails (interrupted context), do emergency save with existing chunks
         emergencySave();
       }
     } else {
@@ -119,20 +174,17 @@ const Recorder = ({ onRecorded, onSaved }) => {
   }, [emergencySave]);
 
   useEffect(() => {
-    // Detect system wake from sleep via visibilitychange + time-jump
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && recordingRef.current) {
         const now = Date.now();
         const gap = now - lastTickRef.current;
-        // If more than 30 seconds have passed since the last tick, the system likely slept
         if (gap > 30000) {
-          console.warn(`[Recorder] System sleep detected (gap: ${Math.round(gap / 1000)}s). Auto-stopping recording.`);
+          console.warn(`[Recorder] System sleep detected (gap: ${Math.round(gap / 1000)}s). Auto-stopping.`);
           emergencyStop();
         }
       }
     };
 
-    // Fallback: beforeunload to attempt save if page is closing
     const handleBeforeUnload = (e) => {
       if (recordingRef.current) {
         emergencyStop();
@@ -164,9 +216,18 @@ const Recorder = ({ onRecorded, onSaved }) => {
     setError('');
     setSleepSaved(false);
     setSaveResult(null);
+    setChunksUploaded(0);
     chunksRef.current = [];
+    chunkIndexRef.current = 0;
+    uploadQueueRef.current = Promise.resolve();
 
     try {
+      // 0. Create recording session on backend FIRST
+      const sessionRes = await api.recordings.start();
+      const sessionId = sessionRes.data?.data?.session_id;
+      if (!sessionId) throw new Error('无法创建录音会话');
+      sessionIdRef.current = sessionId;
+
       // 1. Get microphone
       const micConstraints = selectedMic
         ? { audio: { deviceId: { exact: selectedMic } } }
@@ -181,7 +242,6 @@ const Recorder = ({ onRecorded, onSaved }) => {
           video: true,
           audio: true,
         });
-        // We only need audio - stop any video tracks
         sysStream.getVideoTracks().forEach(t => t.stop());
       } catch (displayErr) {
         console.error('[Recorder] getDisplayMedia failed:', displayErr?.name, displayErr?.message);
@@ -191,7 +251,7 @@ const Recorder = ({ onRecorded, onSaved }) => {
       sysStreamRef.current = sysStream;
 
       if (sysStream.getAudioTracks().length === 0) {
-        console.warn('[Recorder] No audio tracks in system stream, tracks:', sysStream.getTracks().map(t => `${t.kind}:${t.label}`));
+        console.warn('[Recorder] No audio tracks in system stream');
         micStream.getTracks().forEach(t => t.stop());
         sysStream.getTracks().forEach(t => t.stop());
         throw new Error('未检测到系统音轨，请确保勾选了"共享音频"');
@@ -215,29 +275,29 @@ const Recorder = ({ onRecorded, onSaved }) => {
       sysGain.connect(dest);
       sysGainRef.current = sysGain;
 
-      // 4. Record — use timeslice (5s) to flush data periodically for crash safety
+      // 4. Record with 30s timeslice — each chunk is streamed to backend
       const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' });
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          enqueueChunkUpload(e.data);
+        }
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const file = new File([blob], `recording_${Date.now()}.webm`, { type: 'audio/webm' });
+        // On stop: finalize the server-side session
         stopAllStreams();
-        onRecorded?.(file);
-        autoSaveToHistory(file);
+        finalizeSession();
       };
 
-      recorder.start(5000); // flush data every 5 seconds
+      recorder.start(CHUNK_INTERVAL_MS);
       setRecording(true);
       recordingRef.current = true;
       setMicOn(true);
       setSysOn(true);
 
-      // Timer — also updates lastTickRef for sleep detection
+      // Timer
       startTimeRef.current = Date.now();
       lastTickRef.current = Date.now();
       setElapsed(0);
@@ -246,7 +306,7 @@ const Recorder = ({ onRecorded, onSaved }) => {
         setElapsed(Date.now() - startTimeRef.current);
       }, 1000);
 
-      // Stop when screen share ends (user clicks "Stop sharing")
+      // Stop when screen share ends
       sysStream.getVideoTracks()[0]?.addEventListener('ended', () => {
         stopRecording();
       });
@@ -255,6 +315,7 @@ const Recorder = ({ onRecorded, onSaved }) => {
       setError(err.message);
       setRecording(false);
       recordingRef.current = false;
+      sessionIdRef.current = null;
     }
   };
 
@@ -385,7 +446,7 @@ const Recorder = ({ onRecorded, onSaved }) => {
         </div>
       </div>
 
-      {/* Source toggles shown during recording */}
+      {/* Source toggles + chunk counter during recording */}
       {recording && (
         <div style={{
           display: 'flex',
@@ -429,8 +490,16 @@ const Recorder = ({ onRecorded, onSaved }) => {
             <Volume2 size={14} />
             系统音 {sysOn ? '已开启' : '已静音'}
           </button>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-            停止屏幕共享也会结束录制
+          <span style={{
+            fontSize: '0.75rem',
+            color: 'var(--text-secondary)',
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem'
+          }}>
+            <HardDrive size={12} />
+            已保存 {chunksUploaded} 个分块
           </span>
         </div>
       )}
@@ -484,7 +553,7 @@ const Recorder = ({ onRecorded, onSaved }) => {
           fontWeight: 600
         }}>
           <Loader2 size={16} className="animate-spin" />
-          正在保存录音到历史记录...
+          正在合并分块并保存...
         </div>
       )}
 
@@ -502,7 +571,9 @@ const Recorder = ({ onRecorded, onSaved }) => {
           fontWeight: 600
         }}>
           {saveResult.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-          {saveResult.success ? '录音已保存到历史记录' : '保存失败，请手动上传'}
+          {saveResult.success
+            ? `录音已保存${saveResult.sizeMb ? ` (${saveResult.sizeMb} MB)` : ''}，转写已开始`
+            : '保存失败，请手动上传'}
         </div>
       )}
 
