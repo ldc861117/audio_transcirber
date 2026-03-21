@@ -20,5 +20,5 @@ bash start.sh
 
 The app will be available at:
 
-- **Backend (old UI):** http://localhost:5099
+- **Backend API:** http://localhost:5099/api/v2/health
 - **Frontend (React):** http://localhost:3000
