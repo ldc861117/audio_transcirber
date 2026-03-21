@@ -23,6 +23,7 @@ def get_my_subscription():
             "tier": sub.tier,
             "billing_cycle": sub.billing_cycle,
             "status": sub.status,
+            "current_period_start": sub.current_period_start.isoformat() if sub.current_period_start else None,
             "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
             "minutes_used": sub.minutes_used,
             "monthly_minutes_limit": sub.monthly_minutes_limit
@@ -200,6 +201,7 @@ def list_invoices():
         "data": [
             {
                 "id": inv.id,
+                "stripe_invoice_id": inv.stripe_invoice_id,
                 "amount": inv.amount,
                 "currency": inv.currency,
                 "status": inv.status,

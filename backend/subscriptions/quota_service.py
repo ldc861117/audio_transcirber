@@ -108,8 +108,10 @@ class QuotaService:
         remaining = quota - total_used if quota != -1 else float('inf')
         
         return {
-            "total_used": total_used,
-            "quota": quota,
+            "minutes_used": total_used,
+            "monthly_minutes_limit": quota,
+            "total_used": total_used,       # backward compat alias
+            "quota": quota,                  # backward compat alias
             "remaining": remaining,
             "tier": sub.tier,
             "history": [
